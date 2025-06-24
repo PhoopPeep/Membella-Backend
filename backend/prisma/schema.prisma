@@ -1,0 +1,94 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Owner {
+  owner_id     String @id @default(cuid())
+  org_name     String
+  email        String @unique
+  password     String
+  description  String?
+  contact_info String?
+  logo         String?
+  create_at    DateTime @default(now())
+  update_at    DateTime @default(now())
+
+  // Relations
+  plans        Plan[]
+  features     Feature[]
+  mockup_members MockupMember[]
+
+  @@map("owners")
+}
+
+model Plan {
+  plan_id     String @id @default(cuid())
+  owner_id    String
+  name        String
+  description String?
+  price       Decimal
+  duration    Int // Duration in days, months, etc.
+  create_at   DateTime @default(now())
+  update_at   DateTime @updatedAt
+  delete_at   DateTime?
+
+  // Relations
+  owner            Owner @relation(fields: [owner_id], references: [owner_id], onDelete: Cascade)
+  plan_features    PlanFeature[]
+
+  @@map("plans")
+}
+
+model Feature {
+  feature_id  String @id @default(cuid())
+  owner_id    String
+  name        String
+  description String?
+  create_at   DateTime @default(now())
+  update_at   DateTime @updatedAt
+  delete_at   DateTime?
+
+  // Relations
+  owner         Owner @relation(fields: [owner_id], references: [owner_id], onDelete: Cascade)
+  plan_features PlanFeature[]
+
+  @@map("features")
+}
+
+model PlanFeature {
+  plan_id    String
+  feature_id String
+
+  // Relations
+  plan    Plan    @relation(fields: [plan_id], references: [plan_id], onDelete: Cascade)
+  feature Feature @relation(fields: [feature_id], references: [feature_id], onDelete: Cascade)
+
+  @@id([plan_id, feature_id])
+  @@map("plan_features")
+}
+
+model MockupMember {
+  mockup_member_id String @id @default(cuid())
+  owner_id        String
+  name            String
+  email           String
+  password        String
+  create_at       DateTime @default(now())
+
+  // Relations
+  owner         Owner @relation(fields: [owner_id], references: [owner_id], onDelete: Cascade)
+
+  @@map("mockup_members")
+}
