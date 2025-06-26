@@ -1,4 +1,3 @@
-// backend/src/index.js
 const express = require('express');
 const cors = require('cors');
 const { PrismaClient } = require('../generated/prisma/client');
@@ -11,6 +10,13 @@ const {
   updateFeature, 
   deleteFeature 
 } = require('./features');
+const {
+  getPlans,
+  getPlanById,
+  createPlan,
+  updatePlan,
+  deletePlan
+} = require('./plans');
 
 const app = express();
 const prisma = new PrismaClient();
@@ -71,6 +77,13 @@ app.get('/api/features/:id', authenticateToken, getFeatureById);
 app.post('/api/features', authenticateToken, createFeature);
 app.put('/api/features/:id', authenticateToken, updateFeature);
 app.delete('/api/features/:id', authenticateToken, deleteFeature);
+
+// Plans routes
+app.get('/api/plans', authenticateToken, getPlans);
+app.get('/api/plans/:id', authenticateToken, getPlanById);
+app.post('/api/plans', authenticateToken, createPlan);
+app.put('/api/plans/:id', authenticateToken, updatePlan);
+app.delete('/api/plans/:id', authenticateToken, deletePlan);
 
 // Error handling middleware
 app.use((error, req, res, next) => {
