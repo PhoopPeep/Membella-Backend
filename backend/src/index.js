@@ -2,11 +2,11 @@ const express = require('express');
 const cors = require('cors');
 const { PrismaClient } = require('../generated/prisma/client');
 require('dotenv').config();
-const { registerUser, loginUser } = require('./auth');
+const { registerUser, loginUser, authenticateToken } = require('./auth');
 
 const app = express();
 const prisma = new PrismaClient();
-const PORT = process.env.PORT || 5432;
+const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors({
@@ -14,6 +14,12 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+
+// Add request logging middleware for debugging
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  next();
+});
 
 // Routes
 app.get('/api/health', (req, res) => {
@@ -23,12 +29,52 @@ app.get('/api/health', (req, res) => {
 app.post('/api/auth/register', registerUser);
 app.post('/api/auth/login', loginUser);
 
+// Protected route example
+app.get('/api/auth/profile', authenticateToken, async (req, res) => {
+  try {
+    const user = await prisma.owner.findUnique({
+      where: { owner_id: req.user.userId },
+      select: {
+        owner_id: true,
+        org_name: true,
+        email: true,
+        description: true,
+        contact_info: true,
+        logo: true,
+        create_at: true
+      }
+    });
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    res.json({ user });
+  } catch (error) {
+    console.error('Profile fetch error:', error);
+    res.status(500).json({ message: 'Failed to fetch profile' });
+  }
+});
+
+// Error handling middleware
+app.use((error, req, res, next) => {
+  console.error('Server error:', error);
+  res.status(500).json({ message: 'Internal server error' });
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Health check: http://localhost:${PORT}/api/health`);
 });
 
-// Graceful shutdown
+//shutdown
 process.on('beforeExit', async () => {
   await prisma.$disconnect();
+});
+
+process.on('SIGINT', async () => {
+  console.log('\nShutting down gracefully...');
+  await prisma.$disconnect();
+  process.exit(0);
 });
