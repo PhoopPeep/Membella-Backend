@@ -1,4 +1,3 @@
-// backend/src/features.js
 const { PrismaClient } = require('../generated/prisma/client');
 const { authenticateToken } = require('./auth');
 
