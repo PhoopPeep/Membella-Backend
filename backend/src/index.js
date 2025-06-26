@@ -1,8 +1,16 @@
+// backend/src/index.js
 const express = require('express');
 const cors = require('cors');
 const { PrismaClient } = require('../generated/prisma/client');
 require('dotenv').config();
 const { registerUser, loginUser, authenticateToken } = require('./auth');
+const { 
+  getFeatures, 
+  getFeatureById, 
+  createFeature, 
+  updateFeature, 
+  deleteFeature 
+} = require('./features');
 
 const app = express();
 const prisma = new PrismaClient();
@@ -26,10 +34,11 @@ app.get('/api/health', (req, res) => {
   res.json({ message: 'Server is running!' });
 });
 
+// Auth routes
 app.post('/api/auth/register', registerUser);
 app.post('/api/auth/login', loginUser);
 
-// Protected route example
+// Protected auth routes
 app.get('/api/auth/profile', authenticateToken, async (req, res) => {
   try {
     const user = await prisma.owner.findUnique({
@@ -55,6 +64,13 @@ app.get('/api/auth/profile', authenticateToken, async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch profile' });
   }
 });
+
+// Features routes
+app.get('/api/features', authenticateToken, getFeatures);
+app.get('/api/features/:id', authenticateToken, getFeatureById);
+app.post('/api/features', authenticateToken, createFeature);
+app.put('/api/features/:id', authenticateToken, updateFeature);
+app.delete('/api/features/:id', authenticateToken, deleteFeature);
 
 // Error handling middleware
 app.use((error, req, res, next) => {
