@@ -39,14 +39,7 @@ const {
   getMembersByPlan
 } = require('./dashboard');
 
-const app = express();
-const prisma = new PrismaClient();
-const PORT = process.env.PORT || 3001;
-
-// Add this import at the top of your index.js file
-const multer = require('multer');
-
-// Profile routes import
+// Profile routes
 const {
   getProfile,
   updateProfile,
@@ -55,7 +48,14 @@ const {
   removeAvatar
 } = require('./profile');
 
-// Configure multer for file uploads (add this after other middleware)
+const app = express();
+const prisma = new PrismaClient();
+const PORT = process.env.PORT || 3001;
+
+// Add multer import for file uploads
+const multer = require('multer');
+
+// Configure multer for file uploads
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -68,42 +68,6 @@ const upload = multer({
     } else {
       cb(new Error('Only image files are allowed'), false);
     }
-  }
-});
-
-// Add these routes after your existing auth routes and before features routes:
-
-// Profile routes
-app.get('/api/auth/profile', authenticateToken, getProfile);
-app.put('/api/auth/profile', authenticateToken, updateProfile);
-app.put('/api/auth/change-password', authenticateToken, changePassword);
-app.post('/api/auth/upload-avatar', authenticateToken, upload.single('logo'), uploadAvatar);
-app.delete('/api/auth/avatar', authenticateToken, removeAvatar);
-
-// Also update the existing profile route (replace the existing one):
-app.get('/api/auth/profile', authenticateToken, async (req, res) => {
-  try {
-    const user = await prisma.owner.findUnique({
-      where: { owner_id: req.user.userId },
-      select: {
-        owner_id: true,
-        org_name: true,
-        email: true,
-        description: true,
-        contact_info: true,
-        logo: true,
-        create_at: true
-      }
-    });
-    
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-    
-    res.json({ user });
-  } catch (error) {
-    console.error('Profile fetch error:', error);
-    res.status(500).json({ message: 'Failed to fetch profile' });
   }
 });
 
@@ -123,60 +87,40 @@ app.use((req, res, next) => {
   next();
 });
 
-// Routes
+// Health check route
 app.get('/api/health', (req, res) => {
   res.json({ message: 'Server is running!' });
 });
 
-// Auth routes
+// Auth routes (no authentication required)
 app.post('/api/auth/register', registerUser);
 app.post('/api/auth/login', loginUser);
 app.post('/api/auth/resend-verification', resendVerification);
 app.post('/api/auth/callback', handleAuthCallback);
 app.get('/api/auth/callback', handleAuthUrlCallback);  // Handle URL-based auth callback
 
-// Protected auth routes
-app.get('/api/auth/profile', authenticateToken, async (req, res) => {
-  try {
-    const user = await prisma.owner.findUnique({
-      where: { owner_id: req.user.userId },
-      select: {
-        owner_id: true,
-        org_name: true,
-        email: true,
-        description: true,
-        contact_info: true,
-        logo: true,
-        create_at: true
-      }
-    });
-    
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-    
-    res.json({ user });
-  } catch (error) {
-    console.error('Profile fetch error:', error);
-    res.status(500).json({ message: 'Failed to fetch profile' });
-  }
-});
+// Protected profile routes (authentication required)
+app.get('/api/auth/profile', authenticateToken, getProfile);
+app.put('/api/auth/profile', authenticateToken, updateProfile);
+app.put('/api/auth/change-password', authenticateToken, changePassword);
+app.post('/api/auth/upload-avatar', authenticateToken, upload.single('logo'), uploadAvatar);
+app.delete('/api/auth/avatar', authenticateToken, removeAvatar);
 
-// Features routes
+// Features routes (authentication required)
 app.get('/api/features', authenticateToken, getFeatures);
 app.get('/api/features/:id', authenticateToken, getFeatureById);
 app.post('/api/features', authenticateToken, createFeature);
 app.put('/api/features/:id', authenticateToken, updateFeature);
 app.delete('/api/features/:id', authenticateToken, deleteFeature);
 
-// Plans routes
+// Plans routes (authentication required)
 app.get('/api/plans', authenticateToken, getPlans);
 app.get('/api/plans/:id', authenticateToken, getPlanById);
 app.post('/api/plans', authenticateToken, createPlan);
 app.put('/api/plans/:id', authenticateToken, updatePlan);
 app.delete('/api/plans/:id', authenticateToken, deletePlan);
 
-// Dashboard routes
+// Dashboard routes (authentication required)
 app.get('/api/dashboard/stats', authenticateToken, getDashboardStats);
 app.get('/api/dashboard/revenue', authenticateToken, getRevenueData);
 app.get('/api/dashboard/members', authenticateToken, getMembers);
@@ -194,7 +138,7 @@ app.listen(PORT, () => {
   console.log(`Health check: http://localhost:${PORT}/api/health`);
 });
 
-//shutdown
+// Graceful shutdown
 process.on('beforeExit', async () => {
   await prisma.$disconnect();
 });
