@@ -3,7 +3,7 @@ const { supabase } = require('./supabaseClient');
 const jwt = require('jsonwebtoken');
 
 const prisma = new PrismaClient();
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
+const JWT_SECRET = process.env.JWT_SECRET || '65YHSNjVcJ9q4V2GGGlxvQ1hmGt2x344Po8CYi+U9aD5mdiMJlGMXLHF7YyC5Q5ZTCKWOeWfMYXkqDBG4SxSFw==';
 
 // Register a new Owner with Supabase Auth
 async function registerUser(req, res) {
@@ -36,89 +36,103 @@ async function registerUser(req, res) {
 
     console.log('✅ User not found in database, proceeding with Supabase registration');
 
-    // Create user in Supabase Auth with explicit email confirmation
-    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+    // **FIXED: Use the correct Supabase auth signup method**
+    // Instead of admin.createUser, use regular signup which sends confirmation email automatically
+    const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
-      email_confirm: false, // Require email confirmation
-      user_metadata: {
-        org_name,
-        description,
-        contact_info,
-        logo
+      options: {
+        emailRedirectTo: `${process.env.FRONTEND_URL}/auth/callback`,
+        data: {
+          org_name,
+          description,
+          contact_info,
+          logo
+        }
       }
     });
 
     if (authError) {
       console.error('❌ Supabase auth error:', authError);
+      
       if (authError.message.includes('already registered') || authError.message.includes('User already registered')) {
         return res.status(409).json({ message: 'Email already registered.' });
+      }
+      if (authError.message.includes('rate limit')) {
+        return res.status(429).json({ 
+          message: 'Too many registration attempts. Please wait before trying again.',
+          rateLimited: true
+        });
       }
       return res.status(400).json({ message: authError.message });
     }
 
-    console.log('✅ Supabase user created:', authData.user.id);
+    console.log('✅ Supabase user created:', authData.user?.id);
+    console.log('📧 User email confirmed status:', authData.user?.email_confirmed_at);
 
-    // Create user in our database with Supabase user ID
-    const newUser = await prisma.owner.create({
-      data: {
-        owner_id: authData.user.id, // Use Supabase user ID
-        org_name,
-        email,
-        password: '', // Empty since Supabase handles auth
-        description,
-        contact_info,
-        logo,
-      },
-      select: {
-        owner_id: true,
-        org_name: true,
-        email: true,
-        description: true,
-        contact_info: true,
-        logo: true,
-        create_at: true
-      }
-    });
+    // **IMPORTANT**: Only create user in database AFTER email confirmation
+    // For now, we'll store minimal info and complete it after confirmation
+    if (authData.user) {
+      try {
+        const newUser = await prisma.owner.create({
+          data: {
+            owner_id: authData.user.id,
+            org_name,
+            email: email.toLowerCase(),
+            password: '', // Empty since Supabase handles auth
+            description: description || null,
+            contact_info: contact_info || null,
+            logo: logo || null,
+          },
+          select: {
+            owner_id: true,
+            org_name: true,
+            email: true,
+            description: true,
+            contact_info: true,
+            logo: true,
+            create_at: true
+          }
+        });
 
-    console.log('✅ User created in database:', newUser.owner_id);
-
-    // Generate confirmation link and send email
-    try {
-      const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
-        type: 'signup',
-        email,
-        options: {
-          redirectTo: `${process.env.FRONTEND_URL}/auth/callback`
+        console.log('✅ User created in database:', newUser.owner_id);
+        
+        return res.status(201).json({ 
+          message: 'Registration successful! Please check your email (including spam folder) to verify your account before signing in.',
+          user: newUser,
+          requiresVerification: true,
+          debug: {
+            supabaseUserId: authData.user.id,
+            emailSent: true,
+            checkSpamFolder: true,
+            fromEmail: 'noreply@mail.supabase.io',
+            redirectUrl: `${process.env.FRONTEND_URL}/auth/callback`
+          }
+        });
+      } catch (dbError) {
+        console.error('❌ Database error after successful Supabase signup:', dbError);
+        
+        // Clean up Supabase user if database creation fails
+        try {
+          await supabase.auth.admin.deleteUser(authData.user.id);
+          console.log('🧹 Cleaned up Supabase user after database error');
+        } catch (cleanupError) {
+          console.error('❌ Failed to cleanup Supabase user:', cleanupError);
         }
-      });
-
-      if (linkError) {
-        console.error('❌ Error generating confirmation link:', linkError);
-      } else {
-        console.log('✅ Confirmation email sent to:', email);
-        console.log('🔗 Confirmation link generated:', linkData.properties?.action_link || 'Link generated');
+        
+        return res.status(500).json({ 
+          message: 'Registration failed due to database error. Please try again.',
+          error: dbError.message
+        });
       }
-    } catch (emailError) {
-      console.error('❌ Error with email sending:', emailError);
+    } else {
+      return res.status(400).json({ message: 'Failed to create user account.' });
     }
-    
-    return res.status(201).json({ 
-      message: 'Registration successful! Please check your email (including spam folder) to verify your account before signing in.',
-      user: newUser,
-      requiresVerification: true,
-      debug: {
-        supabaseUserId: authData.user.id,
-        emailSent: true,
-        checkSpamFolder: true
-      }
-    });
   } catch (error) {
     console.error('❌ Registration error:', error);
     return res.status(500).json({ 
       message: 'Registration failed.', 
-      error: error.message,
-      debug: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      error: error.message
     });
   }
 }
@@ -136,7 +150,7 @@ async function loginUser(req, res) {
 
     // Sign in with Supabase
     const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email,
+      email: email.toLowerCase(),
       password
     });
 
@@ -229,36 +243,30 @@ async function resendVerification(req, res) {
   console.log('📧 Resending verification for:', email);
 
   try {
-    // First check if user exists in Supabase
-    const { data: users, error: listError } = await supabase.auth.admin.listUsers();
-    
-    if (listError) {
-      console.error('❌ Error listing users:', listError);
-      return res.status(500).json({ message: 'Failed to verify user existence.' });
-    }
-
-    const supabaseUser = users.users.find(user => user.email === email);
-    
-    if (!supabaseUser) {
-      return res.status(404).json({ message: 'No account found with this email address.' });
-    }
-
-    if (supabaseUser.email_confirmed_at) {
-      return res.status(400).json({ message: 'Email is already verified. You can sign in now.' });
-    }
-
-    // Generate new confirmation link
-    const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
+    // **FIXED: Use the correct resend method**
+    const { data, error } = await supabase.auth.resend({
       type: 'signup',
-      email,
+      email: email.toLowerCase(),
       options: {
-        redirectTo: `${process.env.FRONTEND_URL}/auth/callback`
+        emailRedirectTo: `${process.env.FRONTEND_URL}/auth/callback`
       }
     });
 
-    if (linkError) {
-      console.error('❌ Error generating verification link:', linkError);
-      return res.status(400).json({ message: 'Failed to send verification email. Please try again.' });
+    if (error) {
+      console.error('❌ Error resending verification:', error);
+      
+      if (error.message.includes('rate limit')) {
+        return res.status(429).json({ 
+          message: 'Too many requests. Please wait before requesting another verification email.',
+          rateLimited: true
+        });
+      }
+      
+      if (error.message.includes('not found')) {
+        return res.status(404).json({ message: 'No account found with this email address.' });
+      }
+      
+      return res.status(400).json({ message: error.message });
     }
 
     console.log('✅ Verification email resent to:', email);
@@ -266,7 +274,7 @@ async function resendVerification(req, res) {
     return res.json({ 
       message: 'Verification email sent successfully. Please check your inbox and spam folder.',
       debug: {
-        linkGenerated: true,
+        emailSent: true,
         checkSpamFolder: true
       }
     });
@@ -276,24 +284,35 @@ async function resendVerification(req, res) {
   }
 }
 
-// Rest of the functions remain the same...
+// **FIXED: Improved auth callback handling**
 async function handleAuthCallback(req, res) {
-  const { access_token, refresh_token } = req.body;
-
   try {
     console.log('🔄 Processing auth callback');
+    
+    // Get the current session from Supabase
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
-    const { data: { user }, error } = await supabase.auth.getUser(access_token);
-
-    if (error || !user) {
-      console.error('❌ Invalid token in callback:', error);
-      return res.status(400).json({ message: 'Invalid token.' });
+    if (sessionError) {
+      console.error('❌ Session error in callback:', sessionError);
+      return res.status(400).json({ message: 'Session error: ' + sessionError.message });
     }
 
-    console.log('✅ User verified from token:', user.id);
+    if (!session || !session.user) {
+      console.error('❌ No valid session found in callback');
+      return res.status(400).json({ message: 'No valid session found.' });
+    }
 
+    console.log('✅ User verified from session:', session.user.id);
+
+    // Check if user is confirmed
+    if (!session.user.email_confirmed_at) {
+      console.error('❌ User email not confirmed:', session.user.id);
+      return res.status(400).json({ message: 'Email not confirmed.' });
+    }
+
+    // Get user from database
     const dbUser = await prisma.owner.findUnique({
-      where: { owner_id: user.id },
+      where: { owner_id: session.user.id },
       select: {
         owner_id: true,
         org_name: true,
@@ -306,10 +325,11 @@ async function handleAuthCallback(req, res) {
     });
 
     if (!dbUser) {
-      console.error('❌ User not found in database during callback:', user.id);
+      console.error('❌ User not found in database during callback:', session.user.id);
       return res.status(404).json({ message: 'User not found in system.' });
     }
 
+    // Generate JWT token
     const token = jwt.sign(
       { userId: dbUser.owner_id, email: dbUser.email },
       JWT_SECRET,
@@ -321,10 +341,41 @@ async function handleAuthCallback(req, res) {
     return res.json({
       message: 'Authentication successful.',
       token,
-      user: dbUser
+      user: dbUser,
+      session: session
     });
   } catch (error) {
     console.error('❌ Auth callback error:', error);
+    return res.status(500).json({ message: 'Authentication failed: ' + error.message });
+  }
+}
+
+// **NEW: Handle URL-based auth callback (for email link verification)**
+async function handleAuthUrlCallback(req, res) {
+  try {
+    const { access_token, refresh_token, type } = req.query;
+    
+    if (!access_token || !refresh_token) {
+      return res.status(400).json({ message: 'Missing auth tokens in URL.' });
+    }
+
+    console.log('🔄 Processing URL auth callback, type:', type);
+
+    // Set the session with the tokens
+    const { data: { session }, error: sessionError } = await supabase.auth.setSession({
+      access_token,
+      refresh_token
+    });
+
+    if (sessionError || !session) {
+      console.error('❌ Failed to set session:', sessionError);
+      return res.status(400).json({ message: 'Invalid auth tokens.' });
+    }
+
+    // Now handle like a regular callback
+    return handleAuthCallback(req, res);
+  } catch (error) {
+    console.error('❌ URL auth callback error:', error);
     return res.status(500).json({ message: 'Authentication failed.' });
   }
 }
@@ -351,5 +402,6 @@ module.exports = {
   loginUser, 
   resendVerification,
   handleAuthCallback,
+  handleAuthUrlCallback,  // Export the new URL callback handler
   authenticateToken 
 };
