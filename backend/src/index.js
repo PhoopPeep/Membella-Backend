@@ -3,6 +3,8 @@ const cors = require('cors');
 const { PrismaClient } = require('../generated/prisma/client');
 require('dotenv').config();
 const { registerUser, loginUser, authenticateToken } = require('./auth');
+
+// Features routes
 const { 
   getFeatures, 
   getFeatureById, 
@@ -10,6 +12,8 @@ const {
   updateFeature, 
   deleteFeature 
 } = require('./features');
+
+// Plans routes
 const {
   getPlans,
   getPlanById,
@@ -17,6 +21,14 @@ const {
   updatePlan,
   deletePlan
 } = require('./plans');
+
+// Dashboard routes
+const {
+  getDashboardStats,
+  getRevenueData,
+  getMembers,
+  getMembersByPlan
+} = require('./dashboard');
 
 const app = express();
 const prisma = new PrismaClient();
@@ -84,6 +96,13 @@ app.get('/api/plans/:id', authenticateToken, getPlanById);
 app.post('/api/plans', authenticateToken, createPlan);
 app.put('/api/plans/:id', authenticateToken, updatePlan);
 app.delete('/api/plans/:id', authenticateToken, deletePlan);
+
+// Dashboard routes
+app.get('/api/dashboard/stats', authenticateToken, getDashboardStats);
+app.get('/api/dashboard/revenue', authenticateToken, getRevenueData);
+app.get('/api/dashboard/members', authenticateToken, getMembers);
+app.get('/api/dashboard/members-by-plan', authenticateToken, getMembersByPlan);
+
 
 // Error handling middleware
 app.use((error, req, res, next) => {
