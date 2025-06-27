@@ -2,7 +2,16 @@ const express = require('express');
 const cors = require('cors');
 const { PrismaClient } = require('../generated/prisma/client');
 require('dotenv').config();
-const { registerUser, loginUser, authenticateToken } = require('./auth');
+
+// Import all auth functions
+const { 
+  registerUser, 
+  loginUser, 
+  authenticateToken,
+  resendVerification,
+  handleAuthCallback,
+  handleAuthUrlCallback
+} = require('./auth');
 
 // Features routes
 const { 
@@ -44,6 +53,9 @@ app.use(express.json());
 // Add request logging middleware for debugging
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  if (req.query && Object.keys(req.query).length > 0) {
+    console.log('Query params:', req.query);
+  }
   next();
 });
 
@@ -55,6 +67,9 @@ app.get('/api/health', (req, res) => {
 // Auth routes
 app.post('/api/auth/register', registerUser);
 app.post('/api/auth/login', loginUser);
+app.post('/api/auth/resend-verification', resendVerification);
+app.post('/api/auth/callback', handleAuthCallback);
+app.get('/api/auth/callback', handleAuthUrlCallback);  // Handle URL-based auth callback
 
 // Protected auth routes
 app.get('/api/auth/profile', authenticateToken, async (req, res) => {
@@ -102,7 +117,6 @@ app.get('/api/dashboard/stats', authenticateToken, getDashboardStats);
 app.get('/api/dashboard/revenue', authenticateToken, getRevenueData);
 app.get('/api/dashboard/members', authenticateToken, getMembers);
 app.get('/api/dashboard/members-by-plan', authenticateToken, getMembersByPlan);
-
 
 // Error handling middleware
 app.use((error, req, res, next) => {
