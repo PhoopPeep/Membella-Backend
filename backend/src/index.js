@@ -43,6 +43,70 @@ const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3001;
 
+// Add this import at the top of your index.js file
+const multer = require('multer');
+
+// Profile routes import
+const {
+  getProfile,
+  updateProfile,
+  changePassword,
+  uploadAvatar,
+  removeAvatar
+} = require('./profile');
+
+// Configure multer for file uploads (add this after other middleware)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Only allow image files
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'), false);
+    }
+  }
+});
+
+// Add these routes after your existing auth routes and before features routes:
+
+// Profile routes
+app.get('/api/auth/profile', authenticateToken, getProfile);
+app.put('/api/auth/profile', authenticateToken, updateProfile);
+app.put('/api/auth/change-password', authenticateToken, changePassword);
+app.post('/api/auth/upload-avatar', authenticateToken, upload.single('logo'), uploadAvatar);
+app.delete('/api/auth/avatar', authenticateToken, removeAvatar);
+
+// Also update the existing profile route (replace the existing one):
+app.get('/api/auth/profile', authenticateToken, async (req, res) => {
+  try {
+    const user = await prisma.owner.findUnique({
+      where: { owner_id: req.user.userId },
+      select: {
+        owner_id: true,
+        org_name: true,
+        email: true,
+        description: true,
+        contact_info: true,
+        logo: true,
+        create_at: true
+      }
+    });
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    res.json({ user });
+  } catch (error) {
+    console.error('Profile fetch error:', error);
+    res.status(500).json({ message: 'Failed to fetch profile' });
+  }
+});
+
 // Middleware
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
