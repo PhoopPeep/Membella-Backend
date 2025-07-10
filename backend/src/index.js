@@ -3,6 +3,33 @@ const cors = require('cors');
 const { PrismaClient } = require('../generated/prisma/client');
 require('dotenv').config();
 
+// Import error handling utilities
+const {
+  errorHandler,
+  addRequestId,
+  notFoundHandler,
+  logger
+} = require('./utils/errorHandler');
+
+// Import middleware utilities
+const {
+  securityMiddleware,
+  corsOptions,
+  requestLogger,
+  bodySizeLimit,
+  requestTimeout,
+  healthCheck,
+  databaseHealthCheck,
+  validateFileUpload,
+  responseTimeHeader,
+  authRateLimiter,
+  apiRateLimiter,
+  uploadRateLimiter
+} = require('./utils/middleware');
+
+// Import validation utilities
+const { sanitizeRequestBody } = require('./utils/validation');
+
 // Import all auth functions
 const { 
   registerUser, 
@@ -52,17 +79,14 @@ const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3001;
 
-// Add multer import for file uploads
-const multer = require('multer');
-
 // Configure multer for file uploads
+const multer = require('multer');
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: 5 * 1024 * 1024, // 5MB limit
   },
   fileFilter: (req, file, cb) => {
-    // Only allow image files
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
     } else {
@@ -71,80 +95,109 @@ const upload = multer({
   }
 });
 
-// Middleware
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-  credentials: true
-}));
-app.use(express.json());
+// Apply security middleware
+app.use(securityMiddleware);
 
-// Add request logging middleware for debugging
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-  if (req.query && Object.keys(req.query).length > 0) {
-    console.log('Query params:', req.query);
-  }
-  next();
-});
+// Apply CORS
+app.use(cors(corsOptions));
 
-// Health check route
-app.get('/api/health', (req, res) => {
-  res.json({ message: 'Server is running!' });
-});
+// Request ID middleware
+app.use(addRequestId);
 
-// Auth routes (no authentication required)
-app.post('/api/auth/register', registerUser);
-app.post('/api/auth/login', loginUser);
-app.post('/api/auth/resend-verification', resendVerification);
+// Response time header
+app.use(responseTimeHeader);
+
+// Request timeout (30 seconds)
+app.use(requestTimeout(30000));
+
+// Body size limit
+app.use(bodySizeLimit);
+
+// Request logging
+app.use(requestLogger);
+
+// Parse JSON bodies
+app.use(express.json({ limit: '10mb' }));
+
+// Sanitize request body
+app.use(sanitizeRequestBody);
+
+// Health check routes
+app.get('/api/health', healthCheck);
+app.get('/api/health/db', databaseHealthCheck);
+
+// Auth routes (with rate limiting)
+app.post('/api/auth/register', authRateLimiter, registerUser);
+app.post('/api/auth/login', authRateLimiter, loginUser);
+app.post('/api/auth/resend-verification', authRateLimiter, resendVerification);
 app.post('/api/auth/callback', handleAuthCallback);
-app.get('/api/auth/callback', handleAuthUrlCallback);  // Handle URL-based auth callback
+app.get('/api/auth/callback', handleAuthUrlCallback);
 
-// Protected profile routes (authentication required)
-app.get('/api/auth/profile', authenticateToken, getProfile);
-app.put('/api/auth/profile', authenticateToken, updateProfile);
-app.put('/api/auth/change-password', authenticateToken, changePassword);
-app.post('/api/auth/upload-avatar', authenticateToken, upload.single('logo'), uploadAvatar);
-app.delete('/api/auth/avatar', authenticateToken, removeAvatar);
+// Protected profile routes (with rate limiting)
+app.get('/api/auth/profile', apiRateLimiter, authenticateToken, getProfile);
+app.put('/api/auth/profile', apiRateLimiter, authenticateToken, updateProfile);
+app.put('/api/auth/change-password', apiRateLimiter, authenticateToken, changePassword);
+app.post('/api/auth/upload-avatar', uploadRateLimiter, authenticateToken, upload.single('logo'), validateFileUpload, uploadAvatar);
+app.delete('/api/auth/avatar', apiRateLimiter, authenticateToken, removeAvatar);
 
-// Features routes (authentication required)
-app.get('/api/features', authenticateToken, getFeatures);
-app.get('/api/features/:id', authenticateToken, getFeatureById);
-app.post('/api/features', authenticateToken, createFeature);
-app.put('/api/features/:id', authenticateToken, updateFeature);
-app.delete('/api/features/:id', authenticateToken, deleteFeature);
+// Features routes (with rate limiting)
+app.get('/api/features', apiRateLimiter, authenticateToken, getFeatures);
+app.get('/api/features/:id', apiRateLimiter, authenticateToken, getFeatureById);
+app.post('/api/features', apiRateLimiter, authenticateToken, createFeature);
+app.put('/api/features/:id', apiRateLimiter, authenticateToken, updateFeature);
+app.delete('/api/features/:id', apiRateLimiter, authenticateToken, deleteFeature);
 
-// Plans routes (authentication required)
-app.get('/api/plans', authenticateToken, getPlans);
-app.get('/api/plans/:id', authenticateToken, getPlanById);
-app.post('/api/plans', authenticateToken, createPlan);
-app.put('/api/plans/:id', authenticateToken, updatePlan);
-app.delete('/api/plans/:id', authenticateToken, deletePlan);
+// Plans routes (with rate limiting)
+app.get('/api/plans', apiRateLimiter, authenticateToken, getPlans);
+app.get('/api/plans/:id', apiRateLimiter, authenticateToken, getPlanById);
+app.post('/api/plans', apiRateLimiter, authenticateToken, createPlan);
+app.put('/api/plans/:id', apiRateLimiter, authenticateToken, updatePlan);
+app.delete('/api/plans/:id', apiRateLimiter, authenticateToken, deletePlan);
 
-// Dashboard routes (authentication required)
-app.get('/api/dashboard/stats', authenticateToken, getDashboardStats);
-app.get('/api/dashboard/revenue', authenticateToken, getRevenueData);
-app.get('/api/dashboard/members', authenticateToken, getMembers);
-app.get('/api/dashboard/members-by-plan', authenticateToken, getMembersByPlan);
+// Dashboard routes (with rate limiting)
+app.get('/api/dashboard/stats', apiRateLimiter, authenticateToken, getDashboardStats);
+app.get('/api/dashboard/revenue', apiRateLimiter, authenticateToken, getRevenueData);
+app.get('/api/dashboard/members', apiRateLimiter, authenticateToken, getMembers);
+app.get('/api/dashboard/members-by-plan', apiRateLimiter, authenticateToken, getMembersByPlan);
 
-// Error handling middleware
-app.use((error, req, res, next) => {
-  console.error('Server error:', error);
-  res.status(500).json({ message: 'Internal server error' });
-});
+// 404 handler
+app.use(notFoundHandler);
+
+// Global error handling middleware
+app.use(errorHandler);
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/api/health`);
+  logger.info(`Server running on http://localhost:${PORT}`);
+  logger.info(`Health check: http://localhost:${PORT}/api/health`);
+  logger.info(`Database health check: http://localhost:${PORT}/api/health/db`);
 });
 
 // Graceful shutdown
-process.on('beforeExit', async () => {
-  await prisma.$disconnect();
+const gracefulShutdown = async (signal) => {
+  logger.info(`Received ${signal}. Starting graceful shutdown...`);
+  
+  try {
+    await prisma.$disconnect();
+    logger.info('Database connection closed');
+    process.exit(0);
+  } catch (error) {
+    logger.error('Error during shutdown:', error);
+    process.exit(1);
+  }
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught Exception:', error);
+  process.exit(1);
 });
 
-process.on('SIGINT', async () => {
-  console.log('\nShutting down gracefully...');
-  await prisma.$disconnect();
-  process.exit(0);
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
 });

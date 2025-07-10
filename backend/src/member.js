@@ -116,7 +116,7 @@ async function createMember(req, res) {
       return res.status(404).json({ message: 'Plan not found' });
     }
 
-    // Check if member with this email already exists for this owner
+    // Check if member with this email already exists for this user
     const existingMember = await prisma.member.findFirst({
       where: {
         email: email.toLowerCase().trim(),
