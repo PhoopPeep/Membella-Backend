@@ -298,7 +298,7 @@ async function handleAuthCallback(req, res) {
     const token = jwt.sign(
       { userId: dbUser.owner_id, email: dbUser.email },
       JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: '30min' }
     );
 
     console.log('Auth callback successful for:', dbUser.email);

@@ -1,5 +1,6 @@
 const { PrismaClient } = require('../generated/prisma/client');
 const { supabase } = require('./supabaseClient');
+const storageService = require('./utils/supabaseStorage');
 
 const prisma = new PrismaClient();
 
@@ -36,15 +37,14 @@ async function getProfile(req, res) {
   }
 }
 
-// TODO: file upload
 // Update user profile
 async function updateProfile(req, res) {
   try {
     const userId = req.user.userId;
-    const { org_name, email, description, contact_info, logo } = req.body;
+    const { org_name, email, description, contact_info } = req.body;
     
     console.log('Updating profile for user:', userId);
-    console.log('Update data:', { org_name, email, description, contact_info, logo: logo ? 'base64 image provided' : 'no image' });
+    console.log('Update data:', { org_name, email, description, contact_info });
 
     // Check if user exists
     const existingUser = await prisma.owner.findUnique({
@@ -77,9 +77,9 @@ async function updateProfile(req, res) {
     };
 
     if (org_name !== undefined) updateData.org_name = org_name.trim();
+    if (email !== undefined) updateData.email = email.toLowerCase();
     if (description !== undefined) updateData.description = description?.trim() || null;
     if (contact_info !== undefined) updateData.contact_info = contact_info;
-    if (logo !== undefined) updateData.logo = logo;
 
     console.log('Applying database update...');
     
@@ -90,7 +90,7 @@ async function updateProfile(req, res) {
       select: {
         owner_id: true,
         org_name: true,
-        email: false,
+        email: true,
         description: true,
         contact_info: true,
         logo: true,
@@ -181,8 +181,7 @@ async function changePassword(req, res) {
   }
 }
 
-// TODO: file upload
-// Upload profile image/avatar
+// Upload profile image to Supabase Storage
 async function uploadAvatar(req, res) {
   try {
     const userId = req.user.userId;
@@ -211,14 +210,36 @@ async function uploadAvatar(req, res) {
       size: req.file.size
     });
 
-    // Convert file to base64
-    const base64String = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+    // Delete old profile image if exists
+    if (user.logo) {
+      try {
+        // Extract file path from existing URL
+        const oldFilePath = storageService.extractPathFromUrl(user.logo);
+        if (oldFilePath) {
+          console.log('Deleting old profile image:', oldFilePath);
+          await storageService.deleteProfileImage(oldFilePath);
+        }
+      } catch (deleteError) {
+        console.warn('Failed to delete old profile image:', deleteError.message);
+        // Continue with upload even if delete fails
+      }
+    }
 
-    // Update user with new avatar
+    // Upload new image to Supabase Storage
+    const uploadResult = await storageService.uploadProfileImage(
+      req.file.buffer,
+      userId,
+      req.file.originalname,
+      req.file.mimetype
+    );
+
+    console.log('Upload successful:', uploadResult);
+
+    // Update user with new avatar URL
     const updatedUser = await prisma.owner.update({
       where: { owner_id: userId },
       data: {
-        logo: base64String,
+        logo: uploadResult.url,
         update_at: new Date()
       },
       select: {
@@ -240,11 +261,23 @@ async function uploadAvatar(req, res) {
     });
   } catch (error) {
     console.error('Upload avatar error:', error);
+    
+    // Handle specific storage errors
+    if (error.message?.includes('Upload failed')) {
+      return res.status(400).json({ message: error.message });
+    }
+    if (error.message?.includes('File too large')) {
+      return res.status(400).json({ message: 'File too large. Maximum size is 5MB' });
+    }
+    if (error.message?.includes('Invalid file type')) {
+      return res.status(400).json({ message: 'Invalid file type. Only images are allowed' });
+    }
+    
     res.status(500).json({ message: 'Failed to upload profile image' });
   }
 }
 
-// Remove profile image/avatar
+// Remove profile image from Supabase Storage
 async function removeAvatar(req, res) {
   try {
     const userId = req.user.userId;
@@ -261,7 +294,21 @@ async function removeAvatar(req, res) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // Remove avatar from user
+    // Delete image from Supabase Storage if exists
+    if (user.logo) {
+      try {
+        const filePath = storageService.extractPathFromUrl(user.logo);
+        if (filePath) {
+          console.log('Deleting profile image from storage:', filePath);
+          await storageService.deleteProfileImage(filePath);
+        }
+      } catch (deleteError) {
+        console.warn('Failed to delete profile image from storage:', deleteError.message);
+        // Continue with database update even if storage delete fails
+      }
+    }
+
+    // Remove avatar URL from database
     const updatedUser = await prisma.owner.update({
       where: { owner_id: userId },
       data: {

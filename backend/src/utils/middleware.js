@@ -63,25 +63,28 @@ const uploadRateLimiter = createRateLimiter(15 * 60 * 1000, 10, 'Too many upload
 const requestLogger = (req, res, next) => {
   const start = Date.now();
   
-  res.on('finish', () => {
-    const duration = Date.now() - start;
-    const logData = {
-      method: req.method,
-      url: req.url,
-      statusCode: res.statusCode,
-      duration: `${duration}ms`,
-      ip: req.ip,
-      userAgent: req.get('User-Agent'),
-      userId: req.user?.userId,
-      requestId: req.id
-    };
+  // Only attach listener once
+  if (!res.headersSent) {
+    res.on('finish', () => {
+      const duration = Date.now() - start;
+      const logData = {
+        method: req.method,
+        url: req.url,
+        statusCode: res.statusCode,
+        duration: `${duration}ms`,
+        ip: req.ip,
+        userAgent: req.get('User-Agent'),
+        userId: req.user?.userId,
+        requestId: req.id
+      };
 
-    if (res.statusCode >= 400) {
-      logger.warn(logData);
-    } else {
-      logger.info(logData);
-    }
-  });
+      if (res.statusCode >= 400) {
+        logger.warn(logData);
+      } else {
+        logger.info(logData);
+      }
+    });
+  }
 
   next();
 };
@@ -148,7 +151,13 @@ const requestTimeout = (timeoutMs = 30000) => {
       }
     }, timeoutMs);
 
+    // Clear timeout when response finishes
     res.on('finish', () => {
+      clearTimeout(timeout);
+    });
+
+    // Clear timeout when response closes (connection closed by client)
+    res.on('close', () => {
       clearTimeout(timeout);
     });
 
@@ -247,13 +256,49 @@ const paginationMiddleware = (req, res, next) => {
   next();
 };
 
-// Response time header middleware
+// Fixed response time header middleware
 const responseTimeHeader = (req, res, next) => {
   const start = Date.now();
   
+  // Store original methods to avoid double-setting headers
+  const originalEnd = res.end;
+  const originalSend = res.send;
+  const originalJson = res.json;
+  
+  let headerSet = false;
+
+  const setResponseTimeHeader = () => {
+    if (!headerSet && !res.headersSent) {
+      const duration = Date.now() - start;
+      try {
+        res.setHeader('X-Response-Time', `${duration}ms`);
+        headerSet = true;
+      } catch (error) {
+        // Header already sent, ignore
+        logger.debug('Could not set response time header - headers already sent');
+      }
+    }
+  };
+
+  // Override response methods to set header before sending
+  res.end = function(...args) {
+    setResponseTimeHeader();
+    return originalEnd.apply(this, args);
+  };
+
+  res.send = function(...args) {
+    setResponseTimeHeader();
+    return originalSend.apply(this, args);
+  };
+
+  res.json = function(...args) {
+    setResponseTimeHeader();
+    return originalJson.apply(this, args);
+  };
+
+  // Fallback for other response methods
   res.on('finish', () => {
-    const duration = Date.now() - start;
-    res.setHeader('X-Response-Time', `${duration}ms`);
+    setResponseTimeHeader();
   });
 
   next();
@@ -274,4 +319,4 @@ module.exports = {
   validateFileUpload,
   paginationMiddleware,
   responseTimeHeader
-}; 
+};

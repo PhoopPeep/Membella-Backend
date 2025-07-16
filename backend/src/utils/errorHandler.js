@@ -99,6 +99,18 @@ const formatErrorResponse = (error, req) => {
 
 // Global error handling middleware
 const errorHandler = (error, req, res, next) => {
+  // If response already sent, delegate to default Express error handler
+  if (res.headersSent) {
+    logger.error('Error occurred after headers sent:', {
+      message: error.message,
+      stack: error.stack,
+      url: req.url,
+      method: req.method,
+      requestId: req.id
+    });
+    return next(error);
+  }
+
   // Log the error
   logger.error({
     message: error.message,
@@ -171,6 +183,20 @@ const errorHandler = (error, req, res, next) => {
     return res.status(error.statusCode).json(formatErrorResponse(error, req));
   }
 
+  // Handle CORS errors
+  if (error.message && error.message.includes('CORS')) {
+    return res.status(403).json(formatErrorResponse(
+      new AppError('CORS policy violation', 403), req
+    ));
+  }
+
+  // Handle rate limit errors
+  if (error.status === 429 || error.statusCode === 429) {
+    return res.status(429).json(formatErrorResponse(
+      new RateLimitError('Too many requests'), req
+    ));
+  }
+
   // Default error response
   const statusCode = error.statusCode || 500;
   const message = error.message || 'Internal server error';
@@ -200,6 +226,34 @@ const notFoundHandler = (req, res, next) => {
   next(error);
 };
 
+// Graceful error handling for uncaught exceptions
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught Exception:', {
+    message: error.message,
+    stack: error.stack,
+    timestamp: new Date().toISOString()
+  });
+  
+  // Give some time for logging to complete
+  setTimeout(() => {
+    process.exit(1);
+  }, 1000);
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Unhandled Rejection at:', {
+    promise: promise,
+    reason: reason,
+    timestamp: new Date().toISOString()
+  });
+  
+  // Give some time for logging to complete
+  setTimeout(() => {
+    process.exit(1);
+  }, 1000);
+});
+
 module.exports = {
   logger,
   AppError,
@@ -214,4 +268,4 @@ module.exports = {
   addRequestId,
   notFoundHandler,
   formatErrorResponse
-}; 
+};
