@@ -1,11 +1,10 @@
-const { PrismaClient } = require('../generated/prisma/client');
-const { authenticateToken } = require('./auth');
+const { getPrismaClient } = require('../config/database');
+const { asyncHandler } = require('../utils/errorHandler');
 
-const prisma = new PrismaClient();
+const prisma = getPrismaClient();
 
-// Get all plans for the authenticated user
-async function getPlans(req, res) {
-  try {
+class PlansController {
+  getPlans = asyncHandler(async (req, res) => {
     const plans = await prisma.plan.findMany({
       where: {
         owner_id: req.user.userId,
@@ -36,15 +35,9 @@ async function getPlans(req, res) {
     }));
 
     res.json(transformedPlans);
-  } catch (error) {
-    console.error('Get plans error:', error);
-    res.status(500).json({ message: 'Failed to fetch plans' });
-  }
-}
+  });
 
-// Get a single plan by ID
-async function getPlanById(req, res) {
-  try {
+  getPlanById = asyncHandler(async (req, res) => {
     const { id } = req.params;
     
     const plan = await prisma.plan.findFirst({
@@ -79,15 +72,9 @@ async function getPlanById(req, res) {
     };
 
     res.json(transformedPlan);
-  } catch (error) {
-    console.error('Get plan error:', error);
-    res.status(500).json({ message: 'Failed to fetch plan' });
-  }
-}
+  });
 
-// Create a new plan
-async function createPlan(req, res) {
-  try {
+  createPlan = asyncHandler(async (req, res) => {
     const { name, description, price, duration, features = [] } = req.body;
 
     if (!name || !description || !price || !duration) {
@@ -150,15 +137,9 @@ async function createPlan(req, res) {
       message: 'Plan created successfully',
       plan: transformedPlan
     });
-  } catch (error) {
-    console.error('Create plan error:', error);
-    res.status(500).json({ message: 'Failed to create plan' });
-  }
-}
+  });
 
-// Update a plan
-async function updatePlan(req, res) {
-  try {
+  updatePlan = asyncHandler(async (req, res) => {
     const { id } = req.params;
     const { name, description, price, duration, features = [] } = req.body;
 
@@ -245,15 +226,9 @@ async function updatePlan(req, res) {
       message: 'Plan updated successfully',
       plan: transformedPlan
     });
-  } catch (error) {
-    console.error('Update plan error:', error);
-    res.status(500).json({ message: 'Failed to update plan' });
-  }
-}
+  });
 
-// Soft delete a plan
-async function deletePlan(req, res) {
-  try {
+  deletePlan = asyncHandler(async (req, res) => {
     const { id } = req.params;
 
     // Check if plan exists and belongs to user
@@ -280,16 +255,7 @@ async function deletePlan(req, res) {
     });
 
     res.json({ message: 'Plan deleted successfully' });
-  } catch (error) {
-    console.error('Delete plan error:', error);
-    res.status(500).json({ message: 'Failed to delete plan' });
-  }
+  });
 }
 
-module.exports = {
-  getPlans,
-  getPlanById,
-  createPlan,
-  updatePlan,
-  deletePlan
-};
+module.exports = PlansController;
