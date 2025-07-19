@@ -1,5 +1,5 @@
 const { getPrismaClient } = require('../config/database');
-const Feature = require('../models/Feature');
+const Feature = require('../models/Features');
 
 class FeatureRepository {
   constructor() {

@@ -1,5 +1,5 @@
 const UserRepository = require('../repositories/userRepository');
-const { supabase } = require('../config/supabase'); // Import supabase directly
+const { supabase } = require('../config/supabase');
 const jwt = require('jsonwebtoken');
 const { ValidationError, AuthenticationError, ConflictError, AppError, NotFoundError } = require('../utils/errorHandler');
 const User = require('../models/User');
@@ -7,7 +7,7 @@ const User = require('../models/User');
 class AuthService {
   constructor() {
     this.userRepository = new UserRepository();
-    this.supabase = supabase; // Use supabase directly
+    this.supabase = supabase;
     this.jwtSecret = process.env.JWT_SECRET || '65YHSNjVcJ9q4V2GGGlxvQ1hmGt2x344Po8CYi+U9aD5mdiMJlGMXLHF7YyC5Q5ZTCKWOeWfMYXkqDBG4SxSFw==';
   }
 

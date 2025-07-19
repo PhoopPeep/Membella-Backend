@@ -1,9 +1,87 @@
 const { getPrismaClient } = require('../config/database');
 const { supabase } = require('../config/supabase');
-const storageService = require('../utils/supabaseStorage');
 const { asyncHandler } = require('../utils/errorHandler');
 
 const prisma = getPrismaClient();
+
+const storageService = {
+  async uploadProfileImage(fileBuffer, userId, originalName, mimetype) {
+    try {
+      // Generate unique filename
+      const fileExtension = originalName.split('.').pop();
+      const fileName = `profile_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExtension}`;
+      const filePath = `${userId}/${fileName}`;
+
+      console.log('Uploading to Supabase Storage:', {
+        bucket: 'profiles',
+        path: filePath,
+        size: fileBuffer.length,
+        type: mimetype
+      });
+
+      // Upload file to Supabase Storage
+      const { data, error } = await supabase.storage
+        .from('profiles')
+        .upload(filePath, fileBuffer, {
+          contentType: mimetype,
+          cacheControl: '3600',
+          upsert: false
+        });
+
+      if (error) {
+        console.error('Supabase upload error:', error);
+        throw new Error(`Upload failed: ${error.message}`);
+      }
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('profiles')
+        .getPublicUrl(filePath);
+
+      return {
+        path: filePath,
+        url: urlData.publicUrl,
+        fullPath: data.path || filePath
+      };
+    } catch (error) {
+      console.error('Upload profile image error:', error);
+      throw error;
+    }
+  },
+
+  async deleteProfileImage(filePath) {
+    try {
+      const { error } = await supabase.storage
+        .from('profiles')
+        .remove([filePath]);
+
+      if (error) {
+        console.error('Supabase delete error:', error);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.error('Delete profile image error:', error);
+      return false;
+    }
+  },
+
+  extractPathFromUrl(url) {
+    try {
+      if (!url) return null;
+      
+      if (url.includes('/storage/v1/object/public/profiles/')) {
+        const parts = url.split('/storage/v1/object/public/profiles/');
+        return parts[1] || null;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('Extract path from URL error:', error);
+      return null;
+    }
+  }
+};
 
 class ProfileController {
   getProfile = asyncHandler(async (req, res) => {

@@ -1,9 +1,9 @@
-const { getPrismaClient } = require('../config/database'); // Use getPrismaClient function
+const { getPrismaClient } = require('../config/database');
 const User = require('../models/User');
 
 class UserRepository {
   constructor() {
-    this.prisma = getPrismaClient(); // Get prisma instance
+    this.prisma = getPrismaClient();
   }
 
   async findById(id) {

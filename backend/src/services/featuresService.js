@@ -1,5 +1,5 @@
 const FeatureRepository = require('../repositories/featureRepository');
-const Feature = require('../models/Feature');
+const Feature = require('../models/Features');
 const { ValidationError, NotFoundError } = require('../utils/errorHandler');
 
 class FeaturesService {

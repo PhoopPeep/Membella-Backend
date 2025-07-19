@@ -1,14 +1,18 @@
-const { PrismaClient } = require('../../generated/prisma/client');
+const { PrismaClient } = require('@prisma/client');
 
 let prismaInstance = null;
 
+// Get prisma
 function getPrismaClient() {
   if (!prismaInstance) {
-    prismaInstance = new PrismaClient();
+    prismaInstance = new PrismaClient({
+      log: ['query', 'info', 'warn', 'error'],
+    });
   }
   return prismaInstance;
 }
 
+// Connect to database
 async function connectDatabase() {
   try {
     const prisma = getPrismaClient();
@@ -21,10 +25,12 @@ async function connectDatabase() {
   }
 }
 
+// Disconnect database
 async function disconnectDatabase() {
   if (prismaInstance) {
     await prismaInstance.$disconnect();
     prismaInstance = null;
+    console.log('Database disconnected');
   }
 }
 

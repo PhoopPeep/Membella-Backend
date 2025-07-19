@@ -1,116 +1,77 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
-  output   = "../generated/prisma/client"
 }
 
 datasource db {
-  provider = "postgresql" // or your database provider
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
 model Owner {
-  owner_id     String   @id @default(cuid())
-  org_name     String
-  email        String   @unique
-  password     String
-  description  String?
+  owner_id    String    @id @default(uuid())
+  org_name    String
+  email       String    @unique
+  password    String    @default("")
+  description String?
   contact_info String?
-  logo         String?
-  create_at    DateTime @default(now())
-  update_at    DateTime @updatedAt
-  delete_at    DateTime?
-
+  logo        String?
+  create_at   DateTime  @default(now())
+  update_at   DateTime  @default(now())
+  
   // Relations
-  features     Feature[]
-  plans        Plan[]
-  members      Member[]  // New relation for members/subscribers
-
+  features    Feature[]
+  plans       Plan[]
+  
   @@map("owners")
 }
 
 model Feature {
-  feature_id  String   @id @default(cuid())
+  feature_id  String    @id @default(uuid())
   name        String
   description String
   owner_id    String
-  create_at   DateTime @default(now())
-  update_at   DateTime @updatedAt
+  create_at   DateTime  @default(now())
+  update_at   DateTime  @default(now())
   delete_at   DateTime?
-
+  
   // Relations
-  owner         Owner          @relation(fields: [owner_id], references: [owner_id])
+  owner         Owner         @relation(fields: [owner_id], references: [owner_id], onDelete: Cascade)
   plan_features PlanFeature[]
-
+  
   @@map("features")
 }
 
 model Plan {
-  plan_id     String    @id @default(cuid())
+  plan_id     String    @id @default(uuid())
   name        String
   description String
   price       Decimal   @db.Decimal(10, 2)
-  duration    Int       // Duration in days
+  duration    Int       // in days
   owner_id    String
   create_at   DateTime  @default(now())
-  update_at   DateTime  @updatedAt
+  update_at   DateTime  @default(now())
   delete_at   DateTime?
-
+  
   // Relations
-  owner         Owner          @relation(fields: [owner_id], references: [owner_id])
+  owner         Owner         @relation(fields: [owner_id], references: [owner_id], onDelete: Cascade)
   plan_features PlanFeature[]
-  members       Member[]       // New relation for subscribers
-
+  
   @@map("plans")
 }
 
 model PlanFeature {
-  plan_id    String
-  feature_id String
-  create_at  DateTime @default(now())
-
+  plan_feature_id String @id @default(uuid())
+  plan_id         String
+  feature_id      String
+  create_at       DateTime @default(now())
+  
   // Relations
   plan    Plan    @relation(fields: [plan_id], references: [plan_id], onDelete: Cascade)
   feature Feature @relation(fields: [feature_id], references: [feature_id], onDelete: Cascade)
-
-  @@id([plan_id, feature_id])
+  
+  @@unique([plan_id, feature_id])
   @@map("plan_features")
-}
-
-model Member {
-  member_id          String    @id @default(cuid())
-  email              String
-  plan_id            String
-  owner_id           String
-  status             String    @default("active") // active, inactive, cancelled
-  subscription_start DateTime  @default(now())
-  subscription_end   DateTime?
-  create_at          DateTime  @default(now())
-  update_at          DateTime  @updatedAt
-  delete_at          DateTime?
-
-  // Relations
-  plan  Plan  @relation(fields: [plan_id], references: [plan_id])
-  owner Owner @relation(fields: [owner_id], references: [owner_id])
-
-  @@map("members")
-}
-
-model Payment {
-  payment_id     String    @id @default(cuid())
-  member_id      String
-  amount         Decimal   @db.Decimal(10, 2)
-  currency       String    @default("USD")
-  status         String    // pending, completed, failed, refunded
-  payment_method String?   // stripe, paypal, etc.
-  stripe_payment_id String?
-  create_at      DateTime  @default(now())
-  update_at      DateTime  @updatedAt
-
-  @@map("payments")
 }
