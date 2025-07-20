@@ -1,4 +1,4 @@
-const { supabase } = require('../supabaseClient')
+const { supabase } = require('../config/supabase')
 const { v4: uuidv4 } = require('uuid')
 const path = require('path')
 
@@ -254,4 +254,4 @@ class SupabaseStorageService {
   }
 }
 
-module.exports = new SupabaseStorageService()
+module.exports = { SupabaseStorageService }

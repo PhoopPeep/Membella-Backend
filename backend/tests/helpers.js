@@ -1,12 +1,13 @@
-require('dotenv').config({ path: '.env.test' })
-const { PrismaClient } = require('../generated/prisma/client')
-const jwt = require('jsonwebtoken')
+require('dotenv').config({ path: '.env.test' });
+const { PrismaClient } = require('../generated/prisma/client'); // Update path if needed
+const jwt = require('jsonwebtoken');
 
-// ใช้ global prisma
-const prisma = global.prisma || new PrismaClient()
-const JWT_SECRET = process.env.JWT_SECRET
+const prisma = global.prisma || new PrismaClient();
+if (!global.prisma) global.prisma = prisma;
 
-// สร้าง test user
+const JWT_SECRET = process.env.JWT_SECRET || 'test-secret';
+
+// Create a test user
 async function createTestUser(data = {}) {
   const defaultData = {
     owner_id: 'test-user-id-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9),
@@ -15,27 +16,21 @@ async function createTestUser(data = {}) {
     password: '',
     description: 'Test description',
     contact_info: 'test@example.com'
-  }
-
-  return await prisma.owner.create({
-    data: { ...defaultData, ...data }
-  })
+  };
+  return await prisma.owner.create({ data: { ...defaultData, ...data } });
 }
 
-// สร้าง test feature
+// Create a test feature
 async function createTestFeature(ownerId, data = {}) {
   const defaultData = {
     name: 'Test Feature',
     description: 'Test feature description',
     owner_id: ownerId
-  }
-
-  return await prisma.feature.create({
-    data: { ...defaultData, ...data }
-  })
+  };
+  return await prisma.feature.create({ data: { ...defaultData, ...data } });
 }
 
-// สร้าง test plan
+// Create a test plan
 async function createTestPlan(ownerId, data = {}) {
   const defaultData = {
     name: 'Test Plan',
@@ -43,20 +38,25 @@ async function createTestPlan(ownerId, data = {}) {
     price: 99.99,
     duration: 30,
     owner_id: ownerId
-  }
-
-  return await prisma.plan.create({
-    data: { ...defaultData, ...data }
-  })
+  };
+  return await prisma.plan.create({ data: { ...defaultData, ...data } });
 }
 
-// สร้าง JWT token สำหรับ test
+// Create a JWT token for test
 function createTestToken(userId, email) {
-  return jwt.sign(
-    { userId, email },
-    JWT_SECRET,
-    { expiresIn: '1h' }
-  )
+  return jwt.sign({ userId, email }, JWT_SECRET, { expiresIn: '1h' });
+}
+
+// Optional: Clean up all test data (call in afterEach/afterAll if needed)
+async function cleanupTestData() {
+  await prisma.plan.deleteMany({});
+  await prisma.feature.deleteMany({});
+  await prisma.owner.deleteMany({});
+}
+
+// Optional: Disconnect Prisma after all tests
+async function disconnectPrisma() {
+  await prisma.$disconnect();
 }
 
 module.exports = {
@@ -64,5 +64,7 @@ module.exports = {
   createTestUser,
   createTestFeature,
   createTestPlan,
-  createTestToken
-}
+  createTestToken,
+  cleanupTestData,
+  disconnectPrisma
+};
