@@ -25,8 +25,8 @@ class AuthService {
     }
 
     // Create user in Supabase Auth
-    const { data: authData, error: authError } = await this.supabase.auth.signUp({
-      email: userData.email,
+     const { data: authData, error: authError } = await this.supabase.auth.signUp({
+      email: userData.email.toLowerCase().trim(),
       password: userData.password,
       options: {
         emailRedirectTo: `${process.env.FRONTEND_URL}/auth/callback`,
@@ -39,23 +39,12 @@ class AuthService {
       }
     });
 
-    if (authError) {
-      if (authError.message.includes('already registered')) {
-        throw new ConflictError('Email already registered');
-      }
-      if (authError.message.includes('rate limit')) {
-        throw new AppError('Too many registration attempts. Please wait before trying again.', 429);
-      }
-      throw new ValidationError(authError.message);
-    }
-
-    // Create user in local database
     if (authData.user) {
       try {
         const newUser = await this.userRepository.create({
           owner_id: authData.user.id,
           org_name: userData.org_name,
-          email: userData.email,
+          email: userData.email.toLowerCase().trim(),
           password: '',
           description: userData.description,
           contact_info: userData.contact_info,
@@ -64,23 +53,68 @@ class AuthService {
 
         return {
           success: true,
-          message: 'Registration successful! Please check your email to verify your account.',
+          message: 'Registration successful! Please check your email (including spam folder) to verify your account. The verification email was sent from noreply@mail.supabase.io',
           user: newUser,
-          requiresVerification: true
+          requiresVerification: true,
+          supabaseUser: authData.user
         };
       } catch (dbError) {
+        console.error('Database error during registration:', dbError);
+        
         // Cleanup: Delete Supabase user if database creation fails
         try {
           await this.supabase.auth.admin.deleteUser(authData.user.id);
+          console.log('Cleaned up Supabase user after database error');
         } catch (cleanupError) {
           console.error('Failed to cleanup Supabase user:', cleanupError);
         }
+        
         throw new AppError('Registration failed due to database error. Please try again.', 500);
       }
     }
 
-    throw new AppError('Failed to create user account.', 400);
+    throw new AppError('Failed to create user account. Please try again.', 400);
+  } catch (error) {
+    console.error('Registration error:', error);
+    throw error;
   }
+
+  async resendVerification(email) {
+  try {
+    console.log('Attempting to resend verification email to:', email);
+    
+    const { data, error } = await this.supabase.auth.resend({
+      type: 'signup',
+      email: email.toLowerCase().trim(),
+      options: {
+        emailRedirectTo: `${process.env.FRONTEND_URL}/auth/callback`
+      }
+    });
+
+    if (error) {
+      console.error('Resend verification error:', error);
+      
+      if (error.message.includes('rate limit') || error.message.includes('Email rate limit exceeded')) {
+        throw new AppError('Too many requests. Please wait at least 60 seconds before requesting another verification email.', 429);
+      }
+      if (error.message.includes('not found') || error.message.includes('Unable to process request')) {
+        throw new NotFoundError('No account found with this email address, or the account is already verified.');
+      }
+      
+      throw new ValidationError(`Failed to resend verification: ${error.message}`);
+    }
+
+    console.log('Resend verification result:', data);
+
+    return {
+      success: true,
+      message: 'Verification email sent successfully. Please check your inbox and spam folder. The email was sent from noreply@mail.supabase.io'
+    };
+  } catch (error) {
+    console.error('Resend verification service error: ', error);
+    throw error;
+  }
+}
 
   async login(email, password) {
     // Authenticate with Supabase
