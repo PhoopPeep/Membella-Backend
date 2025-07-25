@@ -30,7 +30,12 @@
     "db:push:test": "dotenv -e .env.test -- prisma db push",
     "db:reset:test": "dotenv -e .env.test -- prisma db push --force-reset",
     "test": "dotenv -e .env.test -- jest",
-    "test:watch": "dotenv -e .env.test -- jest --watch"
+    "test:watch": "dotenv -e .env.test -- jest --watch",
+    "test:auth" : "dotenv -e .env.test -- jest tests/utc-01-authentication.test.js",
+    "test:feature": "dotenv -e .env.test -- jest tests/utc-02-feature-management.test",
+    "test:plan": "dotenv -e .env.test -- jest tests/utc-03-plan-management.test",
+    "test:profile": "dotenv -e .env.test -- jest tests/utc-04-profile-management.test.js",
+    "test:support": "dotenv -e .env.test -- jest tests/utc-05-support-management.test.js"
   },
   "keywords": [],
   "author": "",
