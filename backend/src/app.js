@@ -14,12 +14,13 @@ const {
   logger
 } = require('./utils/errorHandler');
 
-// Import routes (NEW ARCHITECTURE)
+// Import routes
 const authRoutes = require('./routes/authRoutes');
 const featureRoutes = require('./routes/featureRoutes');
 const planRoutes = require('./routes/planRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const profileRoutes = require('./routes/profileRoutes');
+const { http } = require('winston');
 
 class App {
   constructor() {
@@ -58,7 +59,7 @@ class App {
         const allowedOrigins = [
           process.env.FRONTEND_URL || 'http://localhost:5173',
           'http://localhost:3000',
-          'http://localhost:3001'
+          'http://localhost:3001',
         ];
         
         // Allow requests with no origin (like mobile apps or curl requests)
@@ -171,55 +172,95 @@ class App {
   }
 
   setupRoutes() {
-    // Health check routes
-    this.app.get('/api/health', (req, res) => {
-      const healthData = {
+  // Health check routes
+  this.app.get('/api/health', (req, res) => {
+    const healthData = {
+      status: 'OK',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      environment: process.env.NODE_ENV || 'development',
+      version: process.env.npm_package_version || '1.0.0'
+    };
+
+    res.status(200).json(healthData);
+  });
+
+  // Database health check
+  this.app.get('/api/health/db', async (req, res) => {
+    try {
+      const { getPrismaClient } = require('./config/database');
+      const prisma = getPrismaClient();
+      
+      await prisma.$queryRaw`SELECT 1`;
+      
+      res.status(200).json({
         status: 'OK',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        environment: process.env.NODE_ENV || 'development',
-        version: process.env.npm_package_version || '1.0.0'
-      };
+        database: 'connected',
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      logger.error({
+        message: 'Database health check failed',
+        error: error.message
+      });
+      
+      res.status(503).json({
+        status: 'ERROR',
+        database: 'disconnected',
+        message: 'Database connection failed',
+        timestamp: new Date().toISOString()
+      });
+    }
+  });
 
-      res.status(200).json(healthData);
-    });
-
-    // Database health check
-    this.app.get('/api/health/db', async (req, res) => {
-      try {
-        const { getPrismaClient } = require('./config/database');
-        const prisma = getPrismaClient();
-        
-        // Simple query to test database connection
-        await prisma.$queryRaw`SELECT 1`;
-        
-        res.status(200).json({
-          status: 'OK',
-          database: 'connected',
-          timestamp: new Date().toISOString()
-        });
-      } catch (error) {
-        logger.error({
-          message: 'Database health check failed',
-          error: error.message
-        });
-        
-        res.status(503).json({
-          status: 'ERROR',
-          database: 'disconnected',
-          message: 'Database connection failed',
-          timestamp: new Date().toISOString()
-        });
+  this.app.use('/api', (req, res, next) => {
+    console.log('API Request:', {
+      method: req.method,
+      url: req.url,
+      originalUrl: req.originalUrl,
+      headers: {
+        authorization: req.headers.authorization ? 'Present' : 'Missing',
+        'content-type': req.headers['content-type']
       }
     });
+    next();
+  });
 
-    // API routes using new architecture
-    this.app.use('/api/auth', authRoutes);
-    this.app.use('/api/features', featureRoutes);
-    this.app.use('/api/plans', planRoutes);
-    this.app.use('/api/dashboard', dashboardRoutes);
-    this.app.use('/api/auth', profileRoutes); // Profile routes under /api/auth/profile, /api/auth/change-password, etc.
+  // API routes
+  this.app.use('/api/auth', authRoutes);
+  this.app.use('/api/features', featureRoutes);
+  this.app.use('/api/plans', planRoutes);
+  this.app.use('/api/dashboard', dashboardRoutes);
+  this.app.use('/api/auth', profileRoutes);
+  
+  if (process.env.NODE_ENV === 'development') {
+    this.app.get('/api/debug/routes', (req, res) => {
+      const routes = [];
+      
+      this.app._router.stack.forEach((middleware) => {
+        if (middleware.route) {
+          // Direct route
+          routes.push({
+            path: middleware.route.path,
+            methods: Object.keys(middleware.route.methods)
+          });
+        } else if (middleware.name === 'router') {
+          // Router middleware
+          middleware.handle.stack.forEach((handler) => {
+            if (handler.route) {
+              routes.push({
+                path: middleware.regexp.source + handler.route.path,
+                methods: Object.keys(handler.route.methods)
+              });
+            }
+          });
+        }
+      });
+      
+      res.json({ registeredRoutes: routes });
+    });
   }
+}
 
   setupErrorHandling() {
     this.app.use(notFoundHandler);
