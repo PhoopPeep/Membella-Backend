@@ -34,9 +34,28 @@ const validateFeature = [
   validate
 ];
 
+const validateForgotPassword = [
+  body('email').isEmail().normalizeEmail().withMessage('Please provide a valid email address'),
+  validate
+];
+
+const validateResetPassword = [
+  body('access_token').notEmpty().withMessage('Access token is required'),
+  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters long'),
+  validate
+];
+
+const validateResetToken = [
+  body('access_token').notEmpty().withMessage('Access token is required'),
+  validate
+];
+
 module.exports = {
   validate,
   validateRegistration,
   validateLogin,
-  validateFeature
+  validateFeature,
+  validateForgotPassword,
+  validateResetPassword,
+  validateResetToken
 };
