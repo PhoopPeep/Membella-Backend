@@ -20,7 +20,11 @@ const featureRoutes = require('./routes/featureRoutes');
 const planRoutes = require('./routes/planRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const profileRoutes = require('./routes/profileRoutes');
+const ownerRouts = require('./routes/ownerRoutes');
+const memberRoutes = require('./routes/memberRoutes');
 const { http } = require('winston');
+const { log } = require('console');
+const { url } = require('inspector');
 
 class App {
   constructor() {
@@ -232,6 +236,32 @@ class App {
   this.app.use('/api/plans', planRoutes);
   this.app.use('/api/dashboard', dashboardRoutes);
   this.app.use('/api/auth', profileRoutes);
+  this.app.use('/api/owner', ownerRouts);
+  this.app.use('/api/member', memberRoutes);
+
+  const corsOptions = {
+    origin: function (origin, callback) {
+      const allowedOrigins = [
+        process.env.OWNER_FRONTEND_URL,
+        process.env.MEMBER_FRONTEND_URL,
+      ];
+
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.indexOf(origin) != -1) {
+        callback(null, true);
+      } else {
+        logger.warn({
+          message: 'CORS blocked request',
+          origin,
+          url: req?.url
+        });
+        callback(new Error('Not allow by CORS'));
+      }
+    },
+    credentials: true,
+    optionsSuccessStatus: 200
+  }
   
   if (process.env.NODE_ENV === 'development') {
     this.app.get('/api/debug/routes', (req, res) => {
