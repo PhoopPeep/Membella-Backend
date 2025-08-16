@@ -177,68 +177,72 @@ class App {
   }
 
   setupRoutes() {
-  // Health check routes
-  this.app.get('/api/health', (req, res) => {
-    const healthData = {
-      status: 'OK',
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      environment: process.env.NODE_ENV || 'development',
-      version: process.env.npm_package_version || '1.0.0'
-    };
-
-    res.status(200).json(healthData);
-  });
-
-  // Database health check
-  this.app.get('/api/health/db', async (req, res) => {
-    try {
-      const { getPrismaClient } = require('./config/database');
-      const prisma = getPrismaClient();
-      
-      await prisma.$queryRaw`SELECT 1`;
-      
-      res.status(200).json({
+    // Health check routes
+    this.app.get('/api/health', (req, res) => {
+      const healthData = {
         status: 'OK',
-        database: 'connected',
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      logger.error({
-        message: 'Database health check failed',
-        error: error.message
-      });
-      
-      res.status(503).json({
-        status: 'ERROR',
-        database: 'disconnected',
-        message: 'Database connection failed',
-        timestamp: new Date().toISOString()
-      });
-    }
-  });
-
-  this.app.use('/api', (req, res, next) => {
-    console.log('API Request:', {
-      method: req.method,
-      url: req.url,
-      originalUrl: req.originalUrl,
-      headers: {
-        authorization: req.headers.authorization ? 'Present' : 'Missing',
-        'content-type': req.headers['content-type']
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        environment: process.env.NODE_ENV || 'development',
+        version: process.env.npm_package_version || '1.0.0'
+      };
+  
+      res.status(200).json(healthData);
+    });
+  
+    // Database health check
+    this.app.get('/api/health/db', async (req, res) => {
+      try {
+        const { getPrismaClient } = require('./config/database');
+        const prisma = getPrismaClient();
+        
+        await prisma.$queryRaw`SELECT 1`;
+        
+        res.status(200).json({
+          status: 'OK',
+          database: 'connected',
+          timestamp: new Date().toISOString()
+        });
+      } catch (error) {
+        logger.error({
+          message: 'Database health check failed',
+          error: error.message
+        });
+        
+        res.status(503).json({
+          status: 'ERROR',
+          database: 'disconnected',
+          message: 'Database connection failed',
+          timestamp: new Date().toISOString()
+        });
       }
     });
-    next();
-  });
-
-  // API routes
-  this.app.use('/api/auth', authRoutes);
-  this.app.use('/api/features', featureRoutes);
-  this.app.use('/api/plans', planRoutes);
-  this.app.use('/api/dashboard', dashboardRoutes);
-  this.app.use('/api/auth', profileRoutes);
-  this.app.use('/api/owner', ownerRouts);
-  this.app.use('/api/member', memberRoutes);
+  
+    this.app.use('/api', (req, res, next) => {
+      console.log('API Request:', {
+        method: req.method,
+        url: req.url,
+        originalUrl: req.originalUrl,
+        headers: {
+          authorization: req.headers.authorization ? 'Present' : 'Missing',
+          'content-type': req.headers['content-type']
+        }
+      });
+      next();
+    });
+  
+    // Import member auth routes
+    const memberAuthRoutes = require('./routes/memberAuthRoutes');
+  
+    // API routes
+    this.app.use('/api/auth', authRoutes);
+    this.app.use('/api/member/auth', memberAuthRoutes); // New member auth routes
+    this.app.use('/api/features', featureRoutes);
+    this.app.use('/api/plans', planRoutes);
+    this.app.use('/api/dashboard', dashboardRoutes);
+    this.app.use('/api/auth', profileRoutes);
+    this.app.use('/api/owner', ownerRouts);
+    this.app.use('/api/member', memberRoutes);
 
   const corsOptions = {
     origin: function (origin, callback) {

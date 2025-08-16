@@ -1,6 +1,4 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
+// backend/prisma/schema.prisma
 generator client {
   provider = "prisma-client-js"
 }
@@ -26,6 +24,21 @@ model Owner {
   plans       Plan[]
   
   @@map("owners")
+}
+
+model Member {
+  member_id   String    @id @default(uuid())
+  email       String    @unique
+  full_name   String
+  phone       String?
+  password    String    @default("")
+  create_at   DateTime  @default(now())
+  update_at   DateTime  @default(now())
+  
+  // Relations
+  subscriptions Subscription[]
+  
+  @@map("members")
 }
 
 model Feature {
@@ -58,6 +71,7 @@ model Plan {
   // Relations
   owner         Owner         @relation(fields: [owner_id], references: [owner_id], onDelete: Cascade)
   plan_features PlanFeature[]
+  subscriptions Subscription[]
   
   @@map("plans")
 }
@@ -74,4 +88,21 @@ model PlanFeature {
   
   @@unique([plan_id, feature_id])
   @@map("plan_features")
+}
+
+model Subscription {
+  subscription_id String   @id @default(uuid())
+  member_id       String
+  plan_id         String
+  status          String   @default("active") // active, cancelled, expired
+  start_date      DateTime @default(now())
+  end_date        DateTime?
+  create_at       DateTime @default(now())
+  update_at       DateTime @default(now())
+  
+  // Relations
+  member Member @relation(fields: [member_id], references: [member_id], onDelete: Cascade)
+  plan   Plan   @relation(fields: [plan_id], references: [plan_id], onDelete: Cascade)
+  
+  @@map("subscriptions")
 }
