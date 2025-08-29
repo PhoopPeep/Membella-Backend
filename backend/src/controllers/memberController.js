@@ -1,3 +1,4 @@
+// backend/src/controllers/memberController.js
 const { getPrismaClient } = require('../config/database');
 const { asyncHandler } = require('../utils/errorHandler');
 
@@ -8,6 +9,15 @@ class MemberController {
     try {
       console.log('MemberController: Getting owners with stats');
       
+      // Test database connection first
+      try {
+        await prisma.$connect();
+        console.log('Database connection successful');
+      } catch (dbError) {
+        console.error('Database connection failed:', dbError);
+        throw new Error('Database connection failed');
+      }
+
       const owners = await prisma.owner.findMany({
         select: {
           owner_id: true,
@@ -74,12 +84,14 @@ class MemberController {
       // adjust planCount
       transformedOwners.sort((a, b) => b.planCount - a.planCount);
 
-      console.log('Owners data transformed successfully');
+      console.log('Owners data transformed successfully:', transformedOwners.length);
 
-      res.json(transformedOwners);
+      // Send proper JSON response
+      res.status(200).json(transformedOwners);
     } catch (error) {
       console.error('Error in getOwners:', error);
       
+      // Send structured error response
       res.status(500).json({
         success: false,
         message: 'Failed to fetch organizations',
@@ -88,34 +100,66 @@ class MemberController {
     }
   });
 
-  // Add new API to get plans for owner
+  // Get plans for specific owner - FIXED PRISMA QUERY
   getOwnerPlans = asyncHandler(async (req, res) => {
     try {
       const { ownerId } = req.params;
       
       console.log('MemberController: Getting plans for owner:', ownerId);
+      console.log('Request params:', req.params);
+      console.log('Request URL:', req.originalUrl);
 
-      if (!ownerId) {
+      // Validate ownerId parameter
+      if (!ownerId || ownerId.trim() === '') {
+        console.error('Owner ID is missing or empty');
         return res.status(400).json({
           success: false,
           message: 'Owner ID is required'
         });
       }
 
-      // check that owner has in database
+      // Validate ownerId format (should be UUID)
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(ownerId)) {
+        console.error('Invalid owner ID format:', ownerId);
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid owner ID format'
+        });
+      }
+
+      // Test database connection
+      try {
+        await prisma.$connect();
+        console.log('Database connection successful for getOwnerPlans');
+      } catch (dbError) {
+        console.error('Database connection failed:', dbError);
+        throw new Error('Database connection failed');
+      }
+
+      // Check if owner exists
+      console.log('Checking if owner exists...');
       const owner = await prisma.owner.findUnique({
         where: { owner_id: ownerId },
-        select: { owner_id: true, org_name: true }
+        select: { 
+          owner_id: true, 
+          org_name: true,
+          email: true 
+        }
       });
 
       if (!owner) {
+        console.error('Owner not found with ID:', ownerId);
         return res.status(404).json({
           success: false,
           message: 'Organization not found'
         });
       }
 
-      // get plans of owner with features
+      console.log('Owner found:', owner.org_name);
+
+      // Get plans of owner with features - FIXED QUERY
+      console.log('Fetching plans for owner...');
       const plans = await prisma.plan.findMany({
         where: {
           owner_id: ownerId,
@@ -125,8 +169,11 @@ class MemberController {
           plan_features: {
             include: {
               feature: {
-                where: {
-                  delete_at: null
+                select: {
+                  feature_id: true,
+                  name: true,
+                  description: true,
+                  delete_at: true
                 }
               }
             }
@@ -139,35 +186,85 @@ class MemberController {
 
       console.log(`Found ${plans.length} plans for owner ${owner.org_name}`);
 
-      // convert plan data
-      const transformedPlans = plans.map(plan => ({
-        id: plan.plan_id,
-        name: plan.name,
-        description: plan.description,
-        price: parseFloat(plan.price.toString()),
-        duration: plan.duration,
-        features: plan.plan_features.map(pf => ({
-          id: pf.feature.feature_id,
-          name: pf.feature.name,
-          description: pf.feature.description
-        })),
-        createdAt: plan.create_at,
-        updatedAt: plan.update_at
-      }));
+      // Transform plan data with better error handling and filter out deleted features
+      const transformedPlans = plans.map(plan => {
+        try {
+          // Filter out any plan_features where feature is null or deleted
+          const validFeatures = plan.plan_features
+            .filter(pf => pf.feature && pf.feature.feature_id && !pf.feature.delete_at)
+            .map(pf => ({
+              id: pf.feature.feature_id,
+              name: pf.feature.name || 'Unnamed Feature',
+              description: pf.feature.description || 'No description available'
+            }));
 
-      res.json(transformedPlans);
+          return {
+            id: plan.plan_id,
+            name: plan.name || 'Unnamed Plan',
+            description: plan.description || 'No description available',
+            price: parseFloat(plan.price.toString()),
+            duration: plan.duration,
+            features: validFeatures,
+            createdAt: plan.create_at,
+            updatedAt: plan.update_at
+          };
+        } catch (transformError) {
+          console.error('Error transforming plan:', plan.plan_id, transformError);
+          // Return a safe default if transformation fails
+          return {
+            id: plan.plan_id,
+            name: plan.name || 'Unnamed Plan',
+            description: plan.description || 'No description available',
+            price: parseFloat(plan.price.toString()) || 0,
+            duration: plan.duration || 0,
+            features: [],
+            createdAt: plan.create_at,
+            updatedAt: plan.update_at
+          };
+        }
+      });
+
+      console.log('Plans data transformed successfully:', transformedPlans.length);
+
+      // Send proper JSON response
+      res.status(200).json(transformedPlans);
+      
     } catch (error) {
       console.error('Error in getOwnerPlans:', error);
+      console.error('Error stack:', error.stack);
       
-      res.status(500).json({
+      // Determine appropriate error status and message
+      let statusCode = 500;
+      let message = 'Failed to fetch organization plans';
+      
+      if (error.code === 'P2025') {
+        // Prisma record not found
+        statusCode = 404;
+        message = 'Organization not found';
+      } else if (error.code === 'P2002') {
+        // Prisma unique constraint violation
+        statusCode = 400;
+        message = 'Invalid request data';
+      } else if (error.message.includes('Invalid `prisma')) {
+        // Prisma query error
+        statusCode = 400;
+        message = 'Invalid query parameters';
+      }
+      
+      res.status(statusCode).json({
         success: false,
-        message: 'Failed to fetch organization plans',
-        error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+        message: message,
+        error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error',
+        details: process.env.NODE_ENV === 'development' ? {
+          ownerId: req.params.ownerId,
+          errorCode: error.code,
+          stack: error.stack
+        } : undefined
       });
     }
   });
 
-  // Find owner
+  // Search owners
   searchOwners = asyncHandler(async (req, res) => {
     try {
       const { q } = req.query; // query parameter for search
@@ -252,7 +349,7 @@ class MemberController {
 
       console.log(`Search found ${transformedOwners.length} owners`);
 
-      res.json(transformedOwners);
+      res.status(200).json(transformedOwners);
     } catch (error) {
       console.error('Error in searchOwners:', error);
       
@@ -276,8 +373,13 @@ class MemberController {
       }
 
       // Test database connection
-      await prisma.$connect();
-      console.log('Database connection successful');
+      try {
+        await prisma.$connect();
+        console.log('Database connection successful');
+      } catch (dbError) {
+        console.error('Database connection failed:', dbError);
+        throw new Error('Database connection failed');
+      }
 
       const plans = await prisma.plan.findMany({
         where: {
@@ -287,8 +389,11 @@ class MemberController {
           plan_features: {
             include: {
               feature: {
-                where: {
-                  delete_at: null
+                select: {
+                  feature_id: true,
+                  name: true,
+                  description: true,
+                  delete_at: true
                 }
               }
             }
@@ -307,7 +412,7 @@ class MemberController {
 
       console.log(`Found ${plans.length} plans`);
 
-      // Transform data for member view
+      // Transform data for member view and filter deleted features
       const transformedPlans = plans.map(plan => ({
         id: plan.plan_id,
         name: plan.name,
@@ -315,17 +420,19 @@ class MemberController {
         price: parseFloat(plan.price.toString()),
         duration: plan.duration,
         organization: plan.owner.org_name,
-        features: plan.plan_features.map(pf => ({
-          id: pf.feature.feature_id,
-          name: pf.feature.name,
-          description: pf.feature.description
-        })),
+        features: plan.plan_features
+          .filter(pf => pf.feature && !pf.feature.delete_at)
+          .map(pf => ({
+            id: pf.feature.feature_id,
+            name: pf.feature.name,
+            description: pf.feature.description
+          })),
         createdAt: plan.create_at
       }));
 
-      console.log('Plans transformed successfully');
+      console.log('Plans transformed successfully:', transformedPlans.length);
 
-      res.json(transformedPlans);
+      res.status(200).json(transformedPlans);
     } catch (error) {
       console.error('Error in getAvailablePlans:', error);
       console.error('Error details:', {
@@ -383,7 +490,7 @@ class MemberController {
 
       // TODO: Implement actual subscription logic
       // For now, return mock response
-      res.json({
+      res.status(200).json({
         success: true,
         message: 'Subscription successful! (Mockup)',
         subscription: {
@@ -422,7 +529,7 @@ class MemberController {
 
       // TODO: Implement actual subscription lookup
       // For now, return mock response
-      res.json({
+      res.status(200).json({
         subscription: {
           id: 'sub_mock123',
           status: 'active',

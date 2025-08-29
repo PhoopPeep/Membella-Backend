@@ -61,7 +61,7 @@ class App {
     const corsOptions = {
       origin: function (origin, callback) {
         const allowedOrigins = [
-          process.env.OWNER_FRONTEND_URLFRONTEND_URL,
+          process.env.OWNER_FRONTEND_URL,
           process.env.MEMBER_FRONTEND_URL,
           'http://localhost:3000',
           'http://localhost:3001',
