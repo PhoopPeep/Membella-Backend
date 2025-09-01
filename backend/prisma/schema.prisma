@@ -1,4 +1,3 @@
-// backend/prisma/schema.prisma
 generator client {
   provider = "prisma-client-js"
 }
@@ -37,6 +36,7 @@ model Member {
   
   // Relations
   subscriptions Subscription[]
+  payments     Payment[]
   
   @@map("members")
 }
@@ -72,6 +72,7 @@ model Plan {
   owner         Owner         @relation(fields: [owner_id], references: [owner_id], onDelete: Cascade)
   plan_features PlanFeature[]
   subscriptions Subscription[]
+  payments     Payment[]
   
   @@map("plans")
 }
@@ -90,10 +91,40 @@ model PlanFeature {
   @@map("plan_features")
 }
 
+model Payment {
+  payment_id      String   @id @default(uuid())
+  member_id       String
+  plan_id         String
+  amount          Decimal  @db.Decimal(10, 2)
+  currency        String   @default("THB")
+  payment_method  String   // 'card', 'promptpay'
+  status          String   @default("pending") // 'pending', 'successful', 'failed', 'expired', 'refunded'
+  description     String?
+  
+  // Omise specific fields
+  omise_charge_id String?
+  omise_source_id String?
+  omise_response  Json?
+  
+  // Metadata
+  metadata        Json?
+  
+  create_at       DateTime @default(now())
+  update_at       DateTime @default(now())
+  
+  // Relations
+  member       Member        @relation(fields: [member_id], references: [member_id], onDelete: Cascade)
+  plan         Plan          @relation(fields: [plan_id], references: [plan_id], onDelete: Cascade)
+  subscription Subscription?
+  
+  @@map("payments")
+}
+
 model Subscription {
   subscription_id String   @id @default(uuid())
   member_id       String
   plan_id         String
+  payment_id      String   @unique
   status          String   @default("active") // active, cancelled, expired
   start_date      DateTime @default(now())
   end_date        DateTime?
@@ -101,8 +132,9 @@ model Subscription {
   update_at       DateTime @default(now())
   
   // Relations
-  member Member @relation(fields: [member_id], references: [member_id], onDelete: Cascade)
-  plan   Plan   @relation(fields: [plan_id], references: [plan_id], onDelete: Cascade)
+  member  Member  @relation(fields: [member_id], references: [member_id], onDelete: Cascade)
+  plan    Plan    @relation(fields: [plan_id], references: [plan_id], onDelete: Cascade)
+  payment Payment @relation(fields: [payment_id], references: [payment_id], onDelete: Cascade)
   
   @@map("subscriptions")
 }

@@ -3,10 +3,8 @@ const cors = require('cors');
 const helmet = require('helmet');
 require('dotenv').config();
 
-// Import config
 const { connectDatabase } = require('./config/database');
 
-// Import error handling utilities
 const {
   errorHandler,
   addRequestId,
@@ -22,9 +20,8 @@ const dashboardRoutes = require('./routes/dashboardRoutes');
 const profileRoutes = require('./routes/profileRoutes');
 const ownerRouts = require('./routes/ownerRoutes');
 const memberRoutes = require('./routes/memberRoutes');
-const { http } = require('winston');
-const { log } = require('console');
-const { url } = require('inspector');
+const paymentRoutes = require('./routes/paymentRoutes');
+const subscriptionRoutes = require('./routes/subscriptionRoutes');
 
 class App {
   constructor() {
@@ -62,9 +59,7 @@ class App {
       origin: function (origin, callback) {
         const allowedOrigins = [
           process.env.OWNER_FRONTEND_URL,
-          process.env.MEMBER_FRONTEND_URL,
-          'http://localhost:3000',
-          'http://localhost:3001',
+          process.env.MEMBER_FRONTEND_URL
         ];
         
         // Allow requests with no origin (like mobile apps or curl requests)
@@ -236,66 +231,44 @@ class App {
   
     // API routes
     this.app.use('/api/auth', authRoutes);
-    this.app.use('/api/member/auth', memberAuthRoutes); // New member auth routes
+    this.app.use('/api/member/auth', memberAuthRoutes);
     this.app.use('/api/features', featureRoutes);
     this.app.use('/api/plans', planRoutes);
     this.app.use('/api/dashboard', dashboardRoutes);
     this.app.use('/api/auth', profileRoutes);
     this.app.use('/api/owner', ownerRouts);
     this.app.use('/api/member', memberRoutes);
-
-  const corsOptions = {
-    origin: function (origin, callback) {
-      const allowedOrigins = [
-        process.env.OWNER_FRONTEND_URL,
-        process.env.MEMBER_FRONTEND_URL,
-      ];
-
-      if (!origin) return callback(null, true);
-
-      if (allowedOrigins.indexOf(origin) != -1) {
-        callback(null, true);
-      } else {
-        logger.warn({
-          message: 'CORS blocked request',
-          origin,
-          url: req?.url
-        });
-        callback(new Error('Not allow by CORS'));
-      }
-    },
-    credentials: true,
-    optionsSuccessStatus: 200
-  }
+    
+    // Payment and Subscription routes
+    this.app.use('/api/payments', paymentRoutes);
+    this.app.use('/api/subscriptions', subscriptionRoutes);
   
-  if (process.env.NODE_ENV === 'development') {
-    this.app.get('/api/debug/routes', (req, res) => {
-      const routes = [];
-      
-      this.app._router.stack.forEach((middleware) => {
-        if (middleware.route) {
-          // Direct route
-          routes.push({
-            path: middleware.route.path,
-            methods: Object.keys(middleware.route.methods)
-          });
-        } else if (middleware.name === 'router') {
-          // Router middleware
-          middleware.handle.stack.forEach((handler) => {
-            if (handler.route) {
-              routes.push({
-                path: middleware.regexp.source + handler.route.path,
-                methods: Object.keys(handler.route.methods)
-              });
-            }
-          });
-        }
+    if (process.env.NODE_ENV === 'development') {
+      this.app.get('/api/debug/routes', (req, res) => {
+        const routes = [];
+        
+        this.app._router.stack.forEach((middleware) => {
+          if (middleware.route) {
+            routes.push({
+              path: middleware.route.path,
+              methods: Object.keys(middleware.route.methods)
+            });
+          } else if (middleware.name === 'router') {
+            middleware.handle.stack.forEach((handler) => {
+              if (handler.route) {
+                routes.push({
+                  path: middleware.regexp.source + handler.route.path,
+                  methods: Object.keys(handler.route.methods)
+                });
+              }
+            });
+          }
+        });
+        
+        res.json({ registeredRoutes: routes });
       });
-      
-      res.json({ registeredRoutes: routes });
-    });
+    }
   }
-}
 
   setupErrorHandling() {
     this.app.use(notFoundHandler);
@@ -310,6 +283,7 @@ class App {
         logger.info(`Server running on http://localhost:${port}`);
         logger.info(`Health check: http://localhost:${port}/api/health`);
         logger.info(`Database health check: http://localhost:${port}/api/health/db`);
+        logger.info(`Payment webhook: http://localhost:${port}/api/payments/webhook`);
       });
     } catch (error) {
       logger.error('Failed to start server:', error);
