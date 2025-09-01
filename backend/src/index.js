@@ -4,7 +4,7 @@ const { disconnectDatabase } = require('./config/database');
 const { logger } = require('./utils/errorHandler');
 
 const app = new App();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT;
 
 app.start(PORT);
 

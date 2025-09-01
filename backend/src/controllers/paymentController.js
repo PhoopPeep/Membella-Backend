@@ -1,3 +1,4 @@
+// backend/src/controllers/paymentController.js - ENHANCED VERSION
 const PaymentService = require('../services/paymentService');
 const { asyncHandler } = require('../utils/errorHandler');
 
@@ -6,16 +7,57 @@ class PaymentController {
     this.paymentService = new PaymentService();
   }
 
+  // Get Omise public key for frontend
+  getOmisePublicKey = asyncHandler(async (req, res) => {
+    try {
+      const publicKey = process.env.OMISE_PUBLIC_KEY;
+      
+      if (!publicKey) {
+        console.error('OMISE_PUBLIC_KEY not configured in environment');
+        return res.status(500).json({
+          success: false,
+          message: 'Payment system not properly configured'
+        });
+      }
+
+      // Validate key format
+      if (!publicKey.startsWith('pkey_')) {
+        console.error('Invalid Omise public key format');
+        return res.status(500).json({
+          success: false,
+          message: 'Invalid payment configuration'
+        });
+      }
+
+      console.log('Providing Omise public key to frontend');
+      
+      res.json({
+        success: true,
+        publicKey
+      });
+    } catch (error) {
+      console.error('Error providing Omise public key:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get payment configuration'
+      });
+    }
+  });
+
   // Create subscription payment
   createSubscriptionPayment = asyncHandler(async (req, res) => {
     try {
       console.log('PaymentController: Create subscription payment request received');
+      console.log('Request body:', {
+        ...req.body,
+        paymentSource: req.body.paymentSource ? '[REDACTED]' : 'null'
+      });
       
       const memberId = req.user.userId;
       const { planId, paymentMethod, paymentSource, customerData } = req.body;
 
-      // Validation
-      if (!planId) {
+      // Enhanced validation
+      if (!planId || typeof planId !== 'string' || planId.trim() === '') {
         return res.status(400).json({
           success: false,
           message: 'Plan ID is required'
@@ -29,24 +71,52 @@ class PaymentController {
         });
       }
 
-      if (paymentMethod === 'card' && !paymentSource) {
-        return res.status(400).json({
-          success: false,
-          message: 'Payment source is required for card payments'
-        });
+      if (paymentMethod === 'card') {
+        if (!paymentSource || typeof paymentSource !== 'string' || paymentSource.trim() === '') {
+          return res.status(400).json({
+            success: false,
+            message: 'Payment source token is required for card payments'
+          });
+        }
+
+        // Validate token format (Omise tokens start with 'tokn_')
+        if (!paymentSource.startsWith('tokn_')) {
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid payment token format'
+          });
+        }
       }
 
-      console.log('Processing subscription payment:', { memberId, planId, paymentMethod });
+      // Validate customer data for card payments
+      if (paymentMethod === 'card' && customerData) {
+        if (customerData.name && (typeof customerData.name !== 'string' || customerData.name.trim() === '')) {
+          return res.status(400).json({
+            success: false,
+            message: 'Valid cardholder name is required'
+          });
+        }
+      }
+
+      console.log('Processing subscription payment:', { 
+        memberId, 
+        planId: planId.trim(), 
+        paymentMethod 
+      });
 
       const result = await this.paymentService.processSubscriptionPayment({
         memberId,
-        planId,
+        planId: planId.trim(),
         paymentMethod,
-        paymentSource,
+        paymentSource: paymentSource?.trim(),
         customerData: customerData || {}
       });
 
-      console.log('Payment processed successfully:', result.paymentId);
+      console.log('Payment processed successfully:', {
+        paymentId: result.paymentId,
+        status: result.status,
+        amount: result.amount
+      });
 
       res.status(201).json({
         success: true,
@@ -57,10 +127,37 @@ class PaymentController {
     } catch (error) {
       console.error('PaymentController subscription payment error:', error);
       
-      res.status(500).json({
+      // Handle specific error types
+      let statusCode = 500;
+      let message = 'Payment processing failed';
+
+      if (error.message.includes('Plan not found')) {
+        statusCode = 404;
+        message = 'The selected plan is no longer available';
+      } else if (error.message.includes('Member not found')) {
+        statusCode = 401;
+        message = 'Authentication required';
+      } else if (error.message.includes('already have an active subscription')) {
+        statusCode = 409;
+        message = 'You already have an active subscription to this plan';
+      } else if (error.message.includes('Invalid card') || error.message.includes('card details')) {
+        statusCode = 400;
+        message = error.message;
+      } else if (error.message.includes('Insufficient funds')) {
+        statusCode = 402;
+        message = error.message;
+      } else if (error.message.includes('expired') || error.message.includes('stolen')) {
+        statusCode = 400;
+        message = error.message;
+      } else if (error.message.includes('amount')) {
+        statusCode = 400;
+        message = 'Invalid payment amount';
+      }
+
+      res.status(statusCode).json({
         success: false,
-        message: error.message || 'Payment processing failed',
-        error: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        message,
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
   });
@@ -71,9 +168,16 @@ class PaymentController {
       const { paymentId } = req.params;
       const memberId = req.user.userId;
 
+      if (!paymentId || paymentId.trim() === '') {
+        return res.status(400).json({
+          success: false,
+          message: 'Payment ID is required'
+        });
+      }
+
       console.log('Getting payment status:', paymentId);
 
-      const payment = await this.paymentService.getPaymentStatus(paymentId);
+      const payment = await this.paymentService.getPaymentStatus(paymentId.trim());
 
       // Verify payment belongs to the requesting member
       if (payment.member_id !== memberId) {
@@ -83,28 +187,54 @@ class PaymentController {
         });
       }
 
+      // Calculate days remaining for active subscriptions
+      let daysRemaining = null;
+      if (payment.subscription && payment.subscription.status === 'active') {
+        const now = new Date();
+        const endDate = new Date(payment.subscription.end_date);
+        daysRemaining = Math.max(0, Math.ceil((endDate - now) / (1000 * 60 * 60 * 24)));
+      }
+
+      const responseData = {
+        id: payment.payment_id,
+        status: payment.status,
+        amount: parseFloat(payment.amount.toString()),
+        currency: payment.currency,
+        paymentMethod: payment.payment_method,
+        description: payment.description,
+        planName: payment.plan?.name,
+        organization: payment.plan?.owner?.org_name,
+        subscription: payment.subscription ? {
+          id: payment.subscription.subscription_id,
+          status: payment.subscription.status,
+          startDate: payment.subscription.start_date,
+          endDate: payment.subscription.end_date,
+          daysRemaining
+        } : null,
+        createdAt: payment.create_at,
+        updatedAt: payment.update_at
+      };
+
       res.json({
         success: true,
-        data: {
-          id: payment.payment_id,
-          status: payment.status,
-          amount: parseFloat(payment.amount.toString()),
-          currency: payment.currency,
-          paymentMethod: payment.payment_method,
-          description: payment.description,
-          planName: payment.plan?.name,
-          organization: payment.plan?.owner?.org_name,
-          createdAt: payment.create_at,
-          updatedAt: payment.update_at
-        }
+        data: responseData
       });
 
     } catch (error) {
       console.error('PaymentController get payment status error:', error);
       
-      res.status(500).json({
+      let statusCode = 500;
+      let message = 'Failed to get payment status';
+
+      if (error.message.includes('Payment not found')) {
+        statusCode = 404;
+        message = 'Payment not found';
+      }
+      
+      res.status(statusCode).json({
         success: false,
-        message: error.message || 'Failed to get payment status'
+        message,
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
   });
@@ -113,14 +243,33 @@ class PaymentController {
   getPaymentHistory = asyncHandler(async (req, res) => {
     try {
       const memberId = req.user.userId;
+      const { limit = 50, offset = 0, status } = req.query;
 
       console.log('Getting payment history for member:', memberId);
 
-      const payments = await this.paymentService.getMemberPaymentHistory(memberId);
+      let payments = await this.paymentService.getMemberPaymentHistory(memberId);
+
+      // Filter by status if provided
+      if (status && ['pending', 'successful', 'failed', 'expired', 'refunded'].includes(status)) {
+        payments = payments.filter(payment => payment.status === status);
+      }
+
+      // Apply pagination
+      const total = payments.length;
+      const paginatedPayments = payments.slice(
+        parseInt(offset), 
+        parseInt(offset) + parseInt(limit)
+      );
 
       res.json({
         success: true,
-        data: payments
+        data: paginatedPayments,
+        pagination: {
+          total,
+          limit: parseInt(limit),
+          offset: parseInt(offset),
+          hasMore: parseInt(offset) + parseInt(limit) < total
+        }
       });
 
     } catch (error) {
@@ -128,7 +277,8 @@ class PaymentController {
       
       res.status(500).json({
         success: false,
-        message: error.message || 'Failed to get payment history'
+        message: 'Failed to get payment history',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
   });
@@ -137,90 +287,146 @@ class PaymentController {
   handleWebhook = asyncHandler(async (req, res) => {
     try {
       console.log('PaymentController: Webhook received');
-      console.log('Webhook event:', req.body.key);
+      console.log('Webhook event type:', req.body.key);
+      
+      // Verify webhook signature if needed
+      // const signature = req.headers['omise-signature'];
+      // if (!this.verifyWebhookSignature(req.body, signature)) {
+      //   return res.status(401).json({ error: 'Invalid signature' });
+      // }
 
       const event = req.body;
 
-      await this.paymentService.handleWebhook(event);
+      // Validate webhook event structure
+      if (!event.key || !event.data) {
+        console.error('Invalid webhook event structure');
+        return res.status(400).json({ error: 'Invalid event structure' });
+      }
+
+      // Process webhook based on event type
+      switch (event.key) {
+        case 'charge.complete':
+        case 'charge.successful':
+          await this.paymentService.handleWebhook(event);
+          break;
+        case 'charge.failed':
+        case 'charge.expired':
+          await this.paymentService.handleWebhook(event);
+          break;
+        default:
+          console.log('Unhandled webhook event type:', event.key);
+          break;
+      }
 
       console.log('Webhook processed successfully');
-
       res.status(200).json({ received: true });
 
     } catch (error) {
       console.error('PaymentController webhook error:', error);
       
-      res.status(500).json({
-        success: false,
-        message: 'Webhook processing failed'
+      // Always return success to prevent webhook retries for our errors
+      res.status(200).json({ 
+        received: true,
+        error: 'Processing failed but acknowledged'
       });
     }
   });
 
-  // Get Omise public key for frontend
-  getOmisePublicKey = asyncHandler(async (req, res) => {
-    const publicKey = process.env.OMISE_PUBLIC_KEY;
-    
-    if (!publicKey) {
-      return res.status(500).json({
-        success: false,
-        message: 'Omise public key not configured'
-      });
-    }
-
-    res.json({
-      success: true,
-      publicKey
-    });
-  });
-
-  // Cancel subscription
-  cancelSubscription = asyncHandler(async (req, res) => {
+  // Poll payment status for PromptPay
+  pollPaymentStatus = asyncHandler(async (req, res) => {
     try {
+      const { paymentId } = req.params;
       const memberId = req.user.userId;
-      const { subscriptionId } = req.params;
+      const { maxAttempts = 60 } = req.query;
 
-      console.log('Cancelling subscription:', subscriptionId);
-
-      const { getPrismaClient } = require('../config/database');
-      const prisma = getPrismaClient();
-
-      // Find and verify subscription
-      const subscription = await prisma.subscription.findFirst({
-        where: {
-          subscription_id: subscriptionId,
-          member_id: memberId,
-          status: 'active'
-        }
-      });
-
-      if (!subscription) {
-        return res.status(404).json({
+      if (!paymentId || paymentId.trim() === '') {
+        return res.status(400).json({
           success: false,
-          message: 'Active subscription not found'
+          message: 'Payment ID is required'
         });
       }
 
-      // Update subscription status
-      await prisma.subscription.update({
-        where: { subscription_id: subscriptionId },
-        data: {
-          status: 'cancelled',
-          update_at: new Date()
-        }
-      });
+      console.log('Starting payment status polling:', paymentId);
+
+      // Verify payment belongs to member first
+      const payment = await this.paymentService.getPaymentStatus(paymentId.trim());
+      if (payment.member_id !== memberId) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied'
+        });
+      }
+
+      // Start polling
+      const result = await this.paymentService.pollPaymentStatus(
+        paymentId.trim(), 
+        parseInt(maxAttempts)
+      );
 
       res.json({
         success: true,
-        message: 'Subscription cancelled successfully'
+        data: result
       });
 
     } catch (error) {
-      console.error('PaymentController cancel subscription error:', error);
+      console.error('PaymentController poll payment status error:', error);
       
+      let statusCode = 500;
+      let message = 'Payment polling failed';
+
+      if (error.message.includes('Payment not found')) {
+        statusCode = 404;
+        message = 'Payment not found';
+      } else if (error.message.includes('timeout')) {
+        statusCode = 408;
+        message = error.message;
+      } else if (error.message.includes('failed') || error.message.includes('expired')) {
+        statusCode = 402;
+        message = error.message;
+      }
+
+      res.status(statusCode).json({
+        success: false,
+        message,
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  });
+
+  // Get payment methods for frontend
+  getPaymentMethods = asyncHandler(async (req, res) => {
+    try {
+      // Return supported payment methods
+      const paymentMethods = [
+        {
+          type: 'card',
+          name: 'Credit/Debit Card',
+          description: 'Visa, Mastercard, etc.',
+          icon: 'credit-card',
+          enabled: true,
+          currencies: ['THB'],
+          processing_time: 'Instant'
+        },
+        {
+          type: 'promptpay',
+          name: 'PromptPay QR',
+          description: 'Scan to pay with mobile banking',
+          icon: 'qrcode',
+          enabled: true,
+          currencies: ['THB'],
+          processing_time: 'Up to 5 minutes'
+        }
+      ];
+
+      res.json({
+        success: true,
+        data: paymentMethods
+      });
+    } catch (error) {
+      console.error('PaymentController get payment methods error:', error);
       res.status(500).json({
         success: false,
-        message: error.message || 'Failed to cancel subscription'
+        message: 'Failed to get payment methods'
       });
     }
   });
@@ -228,6 +434,9 @@ class PaymentController {
   // Verify webhook signature
   verifyWebhookSignature(payload, signature) {
     // TODO: Implement Omise webhook signature verification
+    if (process.env.NODE_ENV === 'development') {
+      return true;
+    }
     return true;
   }
 }
