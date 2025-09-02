@@ -50,13 +50,16 @@ class PaymentController {
       console.log('Request headers:', {
         'content-type': req.headers['content-type'],
         'authorization': req.headers.authorization ? 'Present' : 'Missing',
-        'user-agent': req.headers['user-agent']
+        'user-agent': req.headers['user-agent']?.substring(0, 50) + '...'
       });
       console.log('Request body:', {
         ...req.body,
-        paymentSource: req.body.paymentSource ? '[REDACTED]' : 'null'
+        paymentSource: req.body.paymentSource ? '[TOKEN_REDACTED]' : 'null'
       });
-      console.log('User from token:', req.user);
+      console.log('User from token:', {
+        userId: req.user?.userId,
+        role: req.user?.role
+      });
       
       const memberId = req.user.userId;
       const { planId, paymentMethod, paymentSource, customerData } = req.body;
@@ -78,6 +81,7 @@ class PaymentController {
         });
       }
 
+      // Card-specific validation
       if (paymentMethod === 'card') {
         if (!paymentSource || typeof paymentSource !== 'string' || paymentSource.trim() === '') {
           console.error('Validation failed: Missing paymentSource for card payment');
@@ -87,7 +91,7 @@ class PaymentController {
           });
         }
 
-        // Validate token format (Omise tokens start with 'tokn_')
+        // Validate token format
         if (!paymentSource.startsWith('tokn_')) {
           console.error('Validation failed: Invalid token format:', paymentSource.substring(0, 10));
           return res.status(400).json({
@@ -95,15 +99,13 @@ class PaymentController {
             message: 'Invalid payment token format'
           });
         }
-      }
 
-      // Validate customer data for card payments
-      if (paymentMethod === 'card' && customerData) {
-        if (customerData.name && (typeof customerData.name !== 'string' || customerData.name.trim() === '')) {
+        // Validate customer data for card payments
+        if (customerData?.name && (typeof customerData.name !== 'string' || customerData.name.trim() === '')) {
           console.error('Validation failed: Invalid customer name');
           return res.status(400).json({
             success: false,
-            message: 'Valid cardholder name is required'
+            message: 'Valid cardholder name is required for card payments'
           });
         }
       }
@@ -114,6 +116,7 @@ class PaymentController {
         paymentMethod 
       });
 
+      // Process payment through service
       const result = await this.paymentService.processSubscriptionPayment({
         memberId,
         planId: planId.trim(),
@@ -267,28 +270,36 @@ class PaymentController {
 
       console.log('Getting payment history for member:', memberId);
 
+      // Validate query parameters
+      const limitNum = Math.min(parseInt(limit) || 50, 100); // Max 100 per request
+      const offsetNum = Math.max(parseInt(offset) || 0, 0);
+
+      if (status && !['pending', 'successful', 'failed', 'expired', 'refunded'].includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid status filter'
+        });
+      }
+
       let payments = await this.paymentService.getMemberPaymentHistory(memberId);
 
       // Filter by status if provided
-      if (status && ['pending', 'successful', 'failed', 'expired', 'refunded'].includes(status)) {
+      if (status) {
         payments = payments.filter(payment => payment.status === status);
       }
 
       // Apply pagination
       const total = payments.length;
-      const paginatedPayments = payments.slice(
-        parseInt(offset), 
-        parseInt(offset) + parseInt(limit)
-      );
+      const paginatedPayments = payments.slice(offsetNum, offsetNum + limitNum);
 
       res.json({
         success: true,
         data: paginatedPayments,
         pagination: {
           total,
-          limit: parseInt(limit),
-          offset: parseInt(offset),
-          hasMore: parseInt(offset) + parseInt(limit) < total
+          limit: limitNum,
+          offset: offsetNum,
+          hasMore: offsetNum + limitNum < total
         }
       });
 
@@ -307,22 +318,28 @@ class PaymentController {
   handleWebhook = asyncHandler(async (req, res) => {
     try {
       console.log('PaymentController: Webhook received');
-      console.log('Webhook headers:', req.headers);
+      console.log('Webhook headers:', {
+        'content-type': req.headers['content-type'],
+        'user-agent': req.headers['user-agent'],
+        'omise-signature': req.headers['omise-signature'] ? 'Present' : 'Missing'
+      });
       console.log('Webhook event type:', req.body.key);
-      console.log('Webhook data:', JSON.stringify(req.body, null, 2));
+      console.log('Webhook data preview:', {
+        key: req.body.key,
+        hasData: !!req.body.data,
+        dataId: req.body.data?.id,
+        dataObject: req.body.data?.object
+      });
       
-      // Verify webhook signature if needed
-      // const signature = req.headers['omise-signature'];
-      // if (!this.verifyWebhookSignature(req.body, signature)) {
-      //   return res.status(401).json({ error: 'Invalid signature' });
-      // }
-
       const event = req.body;
 
       // Validate webhook event structure
       if (!event.key || !event.data) {
         console.error('Invalid webhook event structure');
-        return res.status(400).json({ error: 'Invalid event structure' });
+        return res.status(400).json({ 
+          received: false, 
+          error: 'Invalid event structure' 
+        });
       }
 
       // Process webhook based on event type
@@ -339,18 +356,24 @@ class PaymentController {
           break;
         default:
           console.log('Unhandled webhook event type:', event.key);
+          // Still acknowledge receipt
           break;
       }
 
       console.log('Webhook processed successfully');
-      res.status(200).json({ received: true });
+      res.status(200).json({ 
+        received: true,
+        processed: true
+      });
 
     } catch (error) {
       console.error('PaymentController webhook error:', error);
       
       // Always return success to prevent webhook retries for our errors
+      // But log the error for debugging
       res.status(200).json({ 
         received: true,
+        processed: false,
         error: 'Processing failed but acknowledged'
       });
     }
@@ -370,7 +393,10 @@ class PaymentController {
         });
       }
 
-      console.log('Starting payment status polling:', paymentId);
+      // Validate maxAttempts
+      const maxAttemptsNum = Math.min(Math.max(parseInt(maxAttempts) || 60, 1), 300); // 1-300 attempts
+
+      console.log('Starting payment status polling:', paymentId, 'max attempts:', maxAttemptsNum);
 
       // Verify payment belongs to member first
       const payment = await this.paymentService.getPaymentStatus(paymentId.trim());
@@ -384,7 +410,7 @@ class PaymentController {
       // Start polling
       const result = await this.paymentService.pollPaymentStatus(
         paymentId.trim(), 
-        parseInt(maxAttempts)
+        maxAttemptsNum
       );
 
       res.json({
@@ -420,25 +446,31 @@ class PaymentController {
   // Get payment methods for frontend
   getPaymentMethods = asyncHandler(async (req, res) => {
     try {
-      // Return supported payment methods
+      // Return supported payment methods with current status
       const paymentMethods = [
         {
           type: 'card',
           name: 'Credit/Debit Card',
-          description: 'Visa, Mastercard, etc.',
+          description: 'Visa, Mastercard, JCB, American Express',
           icon: 'credit-card',
           enabled: true,
           currencies: ['THB'],
-          processing_time: 'Instant'
+          processing_time: 'Instant',
+          min_amount: 1,
+          max_amount: 200000,
+          features: ['instant_confirmation', '3d_secure_support']
         },
         {
           type: 'promptpay',
           name: 'PromptPay QR',
-          description: 'Scan to pay with mobile banking',
+          description: 'Scan to pay with mobile banking app',
           icon: 'qrcode',
           enabled: true,
           currencies: ['THB'],
-          processing_time: 'Up to 5 minutes'
+          processing_time: 'Up to 5 minutes',
+          min_amount: 20,
+          max_amount: 50000,
+          features: ['qr_code', 'mobile_banking']
         }
       ];
 
@@ -455,14 +487,70 @@ class PaymentController {
     }
   });
 
-  // Verify webhook signature
-  verifyWebhookSignature(payload, signature) {
-    // TODO: Implement Omise webhook signature verification
-    if (process.env.NODE_ENV === 'development') {
-      return true;
+  // Validate payment before processing (utility endpoint)
+  validatePayment = asyncHandler(async (req, res) => {
+    try {
+      const { planId, paymentMethod, amount, paymentSource } = req.body;
+
+      const errors = [];
+
+      // Validate plan ID
+      if (!planId || typeof planId !== 'string' || planId.trim() === '') {
+        errors.push('Valid plan ID is required');
+      }
+
+      // Validate payment method
+      if (!paymentMethod || !['card', 'promptpay'].includes(paymentMethod)) {
+        errors.push('Valid payment method is required (card or promptpay)');
+      }
+
+      // Validate payment source for card payments
+      if (paymentMethod === 'card') {
+        if (!paymentSource || typeof paymentSource !== 'string') {
+          errors.push('Payment source token is required for card payments');
+        } else if (!paymentSource.startsWith('tokn_')) {
+          errors.push('Invalid payment token format');
+        }
+      }
+
+      // Validate amount
+      if (amount !== undefined) {
+        const numAmount = parseFloat(amount);
+        if (isNaN(numAmount) || numAmount <= 0) {
+          errors.push('Amount must be a positive number');
+        } else {
+          const amountInSatang = Math.round(numAmount * 100);
+          
+          if (paymentMethod === 'card' && amountInSatang < 100) {
+            errors.push('Card payment minimum is 1 THB');
+          } else if (paymentMethod === 'promptpay' && amountInSatang < 2000) {
+            errors.push('PromptPay minimum is 20 THB');
+          }
+        }
+      }
+
+      if (errors.length > 0) {
+        return res.status(400).json({
+          success: false,
+          valid: false,
+          errors
+        });
+      }
+
+      res.json({
+        success: true,
+        valid: true,
+        message: 'Payment data is valid'
+      });
+
+    } catch (error) {
+      console.error('PaymentController validate payment error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Validation failed'
+      });
     }
-    return true;
-  }
+  });
 }
 
 module.exports = PaymentController;

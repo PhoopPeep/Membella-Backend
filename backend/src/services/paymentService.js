@@ -5,19 +5,20 @@ const { v4: uuidv4 } = require('uuid');
 const prisma = getPrismaClient();
 
 class PaymentService {
-  // Create a payment charge
-  async createCharge(paymentData) {
+  // Create a card payment charge
+  async createCardCharge(paymentData) {
     const { 
       amount, 
       currency = 'THB', 
       description, 
-      source, 
+      token, 
       customerId, 
-      metadata = {} 
+      metadata = {},
+      capture = true
     } = paymentData;
 
     try {
-      console.log('Creating Omise charge:', { amount, currency, description });
+      console.log('Creating Omise card charge:', { amount, currency, description, hasToken: !!token });
 
       // Validate amount
       const amountInSatang = Math.round(amount * 100);
@@ -25,49 +26,85 @@ class PaymentService {
         throw new Error('Invalid amount: must be greater than 0');
       }
 
+      // Minimum amount check for cards (1 THB = 100 satang)
+      if (amountInSatang < 100) {
+        throw new Error('Invalid amount: minimum payment is 1 THB');
+      }
+
+      if (!token || typeof token !== 'string' || !token.startsWith('tokn_')) {
+        throw new Error('Invalid card token provided');
+      }
+
       const charge = await omise.charges.create({
         amount: amountInSatang,
         currency: currency.toUpperCase(),
-        description,
-        source,
-        capture: true,
+        description: description || 'Card payment',
+        card: token, // Use card parameter for token-based charges
+        capture: capture, // Capture immediately for card payments
         metadata: {
           ...metadata,
           customer_id: customerId,
+          payment_method: 'card',
           created_by: 'membella_platform'
         },
       });
 
-      console.log('Omise charge created:', {
+      console.log('Omise card charge created:', {
         id: charge.id,
         amount: charge.amount,
         status: charge.status,
-        paid: charge.paid
+        paid: charge.paid,
+        authorized: charge.authorized,
+        captured: charge.captured
       });
 
-      return charge;
+      // Validate charge response                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              
+      if (!charge || !charge.id) {
+        throw new Error('Failed to create charge - invalid response from payment gateway');
+      }
+
+      return {
+        charge,
+        success: charge.paid || (charge.authorized && charge.captured),
+        requiresAuthorization: !!charge.authorize_uri
+      };
     } catch (error) {
-      console.error('Omise charge creation failed:', error);
+      console.error('Omise card charge creation failed:', error);
       
       // Handle specific Omise errors
       if (error.code) {
         switch (error.code) {
           case 'invalid_card':
-            throw new Error('Invalid card information. Please check your card details.');
+            throw new Error('Invalid card information. Please check your card details and try again.');
           case 'insufficient_fund':
-            throw new Error('Insufficient funds on your card.');
+          case 'insufficient_funds':
+            throw new Error('Insufficient funds on your card. Please use a different card.');
           case 'stolen_or_lost_card':
-            throw new Error('This card has been reported as stolen or lost.');
+            throw new Error('This card has been reported as stolen or lost. Please use a different card.');
           case 'expired_card':
-            throw new Error('This card has expired.');
+            throw new Error('This card has expired. Please check the expiry date.');
           case 'processing_error':
-            throw new Error('Payment processing error. Please try again.');
+            throw new Error('Payment processing error. Please try again in a few moments.');
+          case 'failed_processing':
+            throw new Error('Card processing failed. Please check your card details.');
+          case 'invalid_security_code':
+            throw new Error('Invalid security code (CVV). Please check and try again.');
+          case 'limit_exceeded':
+            throw new Error('Transaction limit exceeded. Please contact your bank.');
           default:
-            throw new Error(`Payment failed: ${error.message}`);
+            throw new Error(`Card payment failed: ${error.message}`);
+        }
+      }
+
+      // Handle HTTP errors
+      if (error.response && error.response.data) {
+        const responseData = error.response.data;
+        if (responseData.message) {
+          throw new Error(`Payment failed: ${responseData.message}`);
         }
       }
       
-      throw new Error(`Payment failed: ${error.message}`);
+      throw new Error(`Card payment failed: ${error.message}`);
     }
   }
 
@@ -81,7 +118,7 @@ class PaymentService {
       // Validate amount
       const amountInSatang = Math.round(amount * 100);
       if (amountInSatang <= 0 || amountInSatang < 2000) { // Minimum 20 THB for PromptPay
-        throw new Error('Invalid amount: must be at least 20 THB');
+        throw new Error('Invalid amount: minimum payment for PromptPay is 20 THB');
       }
 
       console.log('Amount in satang:', amountInSatang);
@@ -260,9 +297,11 @@ class PaymentService {
 
       const amount = parseFloat(plan.price.toString());
       
-      // Validate minimum amount for PromptPay
+      // Validate minimum amount
       if (paymentMethod === 'promptpay' && amount < 20) {
         throw new Error('PromptPay requires minimum payment of 20 THB');
+      } else if (paymentMethod === 'card' && amount < 1) {
+        throw new Error('Card payment requires minimum payment of 1 THB');
       }
 
       const description = `Subscription: ${plan.name} - ${plan.owner.org_name}`;
@@ -310,17 +349,18 @@ class PaymentService {
               throw new Error('Payment source token is required for card payments');
             }
             
-            chargeResult = await this.createCharge({
+            chargeResult = await this.createCardCharge({
               amount,
               currency: 'THB',
               description,
-              source: paymentSource,
+              token: paymentSource,
               customerId: memberId,
               metadata: {
                 payment_id: paymentRecord.payment_id,
                 plan_id: planId,
                 member_id: memberId
-              }
+              },
+              capture: true // Capture immediately for subscription payments
             });
           } else {
             throw new Error('Unsupported payment method');
@@ -344,9 +384,25 @@ class PaymentService {
             data: updateData
           });
 
-          // If card payment is immediately successful, create subscription
+          // For card payment, check if it's successful and create subscription
           const finalStatus = chargeResult.charge?.status || chargeResult.status;
-          if (finalStatus === 'successful') {
+          const isSuccessful = paymentMethod === 'card' ? 
+            (chargeResult.charge?.paid || (chargeResult.charge?.authorized && chargeResult.charge?.captured)) :
+            finalStatus === 'successful';
+
+          if (isSuccessful) {
+            // Update payment status to successful for immediate card payments
+            if (paymentMethod === 'card') {
+              await tx.payment.update({
+                where: { payment_id: paymentRecord.payment_id },
+                data: {
+                  status: 'successful',
+                  update_at: new Date()
+                }
+              });
+            }
+            
+            // Create subscription
             await this.createSubscriptionFromPayment(paymentRecord.payment_id, tx);
           }
 
@@ -358,7 +414,7 @@ class PaymentService {
             chargeId: chargeResult.charge?.id || chargeResult.id,
             amount,
             currency: 'THB',
-            status: finalStatus
+            status: paymentMethod === 'card' && isSuccessful ? 'successful' : finalStatus
           };
 
           // Add PromptPay specific data
@@ -725,6 +781,10 @@ class PaymentService {
 
     if (paymentMethod === 'card' && !paymentSource) {
       throw new Error('Payment source token is required for card payments');
+    }
+
+    if (paymentMethod === 'card' && paymentSource && !paymentSource.startsWith('tokn_')) {
+      throw new Error('Invalid payment token format');
     }
 
     return true;
