@@ -5,6 +5,12 @@ const { v4: uuidv4 } = require('uuid');
 const prisma = getPrismaClient();
 
 class PaymentService {
+  constructor() {
+    // Cache for recent webhook processing to prevent duplicates
+    this.recentWebhooks = new Map();
+    this.webhookCacheTimeout = 300000; // 5 minutes
+  }
+
   // Create a card payment charge
   async createCardCharge(paymentData) {
     const { 
@@ -20,13 +26,11 @@ class PaymentService {
     try {
       console.log('Creating Omise card charge:', { amount, currency, description, hasToken: !!token });
 
-      // Validate amount
       const amountInSatang = Math.round(amount * 100);
       if (amountInSatang <= 0) {
         throw new Error('Invalid amount: must be greater than 0');
       }
 
-      // Minimum amount check for cards (1 THB = 100 satang)
       if (amountInSatang < 100) {
         throw new Error('Invalid amount: minimum payment is 1 THB');
       }
@@ -39,8 +43,8 @@ class PaymentService {
         amount: amountInSatang,
         currency: currency.toUpperCase(),
         description: description || 'Card payment',
-        card: token, // Use card parameter for token-based charges
-        capture: capture, // Capture immediately for card payments
+        card: token,
+        capture: capture,
         metadata: {
           ...metadata,
           customer_id: customerId,
@@ -58,7 +62,6 @@ class PaymentService {
         captured: charge.captured
       });
 
-      // Validate charge response                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              
       if (!charge || !charge.id) {
         throw new Error('Failed to create charge - invalid response from payment gateway');
       }
@@ -71,7 +74,6 @@ class PaymentService {
     } catch (error) {
       console.error('Omise card charge creation failed:', error);
       
-      // Handle specific Omise errors
       if (error.code) {
         switch (error.code) {
           case 'invalid_card':
@@ -96,7 +98,6 @@ class PaymentService {
         }
       }
 
-      // Handle HTTP errors
       if (error.response && error.response.data) {
         const responseData = error.response.data;
         if (responseData.message) {
@@ -115,15 +116,13 @@ class PaymentService {
     try {
       console.log('Creating PromptPay charge:', { amount, description });
 
-      // Validate amount
       const amountInSatang = Math.round(amount * 100);
-      if (amountInSatang <= 0 || amountInSatang < 2000) { // Minimum 20 THB for PromptPay
+      if (amountInSatang <= 0 || amountInSatang < 2000) {
         throw new Error('Invalid amount: minimum payment for PromptPay is 20 THB');
       }
 
       console.log('Amount in satang:', amountInSatang);
 
-      // Create PromptPay source first using SECRET KEY
       const source = await omise.sources.create({
         type: 'promptpay',
         amount: amountInSatang,
@@ -138,21 +137,18 @@ class PaymentService {
         has_scannable_code: !!source.scannable_code
       });
 
-      // Check if source creation was successful
       if (!source || !source.id) {
         throw new Error('Failed to create PromptPay source');
       }
 
-      // Wait a moment for source to be ready
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // Create charge with the source
       const charge = await omise.charges.create({
         amount: amountInSatang,
         currency: 'THB',
         description: description || 'PromptPay Payment',
         source: source.id,
-        capture: false, // PromptPay is always manual capture
+        capture: false,
         metadata: {
           ...metadata,
           customer_id: customerId,
@@ -170,7 +166,6 @@ class PaymentService {
         paid: charge.paid
       });
 
-      // Get QR code - it should be in the source object
       let qrCodeUrl = null;
       let expiresAt = null;
 
@@ -188,7 +183,6 @@ class PaymentService {
 
       if (!qrCodeUrl) {
         console.warn('No QR code found in source response');
-        // Try to retrieve the source again
         try {
           const retrievedSource = await omise.sources.retrieve(source.id);
           console.log('Retrieved source:', retrievedSource);
@@ -215,7 +209,6 @@ class PaymentService {
     } catch (error) {
       console.error('PromptPay charge creation failed:', error);
       
-      // Log detailed error information
       if (error.response) {
         console.error('Omise API Error Response:', {
           status: error.response.status,
@@ -228,7 +221,6 @@ class PaymentService {
         console.error('Omise Error Code:', error.code);
       }
 
-      // More specific error handling for PromptPay
       if (error.message && error.message.includes('amount')) {
         throw new Error('Invalid payment amount. PromptPay requires minimum 20 THB.');
       }
@@ -245,7 +237,7 @@ class PaymentService {
     }
   }
 
-  // Process subscription payment
+  // Process subscription payment with error handling
   async processSubscriptionPayment({
     memberId,
     planId,
@@ -256,7 +248,6 @@ class PaymentService {
     try {
       console.log('Processing subscription payment:', { memberId, planId, paymentMethod });
 
-      // Get plan details with owner info
       const plan = await prisma.plan.findUnique({
         where: { plan_id: planId },
         include: {
@@ -273,7 +264,6 @@ class PaymentService {
         throw new Error('Plan not found');
       }
 
-      // Get member details
       const member = await prisma.member.findUnique({
         where: { member_id: memberId }
       });
@@ -282,7 +272,6 @@ class PaymentService {
         throw new Error('Member not found');
       }
 
-      // Check for existing active subscription
       const existingSubscription = await prisma.subscription.findFirst({
         where: {
           member_id: memberId,
@@ -297,7 +286,6 @@ class PaymentService {
 
       const amount = parseFloat(plan.price.toString());
       
-      // Validate minimum amount
       if (paymentMethod === 'promptpay' && amount < 20) {
         throw new Error('PromptPay requires minimum payment of 20 THB');
       } else if (paymentMethod === 'card' && amount < 1) {
@@ -306,9 +294,7 @@ class PaymentService {
 
       const description = `Subscription: ${plan.name} - ${plan.owner.org_name}`;
 
-      // Start transaction
       return await prisma.$transaction(async (tx) => {
-        // Create payment record first
         const paymentRecord = await tx.payment.create({
           data: {
             payment_id: uuidv4(),
@@ -324,7 +310,8 @@ class PaymentService {
               organization: plan.owner.org_name,
               member_email: member.email,
               member_name: member.full_name,
-              customer_data: customerData || {}
+              customer_data: customerData || {},
+              webhook_ready: true // Flag to indicate this payment expects webhooks
             }
           }
         });
@@ -332,7 +319,6 @@ class PaymentService {
         let chargeResult;
 
         try {
-          // Create charge based on payment method
           if (paymentMethod === 'promptpay') {
             chargeResult = await this.createPromptPayCharge({
               amount,
@@ -360,13 +346,12 @@ class PaymentService {
                 plan_id: planId,
                 member_id: memberId
               },
-              capture: true // Capture immediately for subscription payments
+              capture: true
             });
           } else {
             throw new Error('Unsupported payment method');
           }
 
-          // Update payment record with charge info
           const updateData = {
             omise_charge_id: chargeResult.charge?.id || chargeResult.id,
             status: this.mapOmiseStatusToLocal(chargeResult.charge?.status || chargeResult.status),
@@ -374,7 +359,6 @@ class PaymentService {
             update_at: new Date()
           };
 
-          // Add source info for PromptPay
           if (paymentMethod === 'promptpay' && chargeResult.source) {
             updateData.omise_source_id = chargeResult.source.id;
           }
@@ -384,14 +368,12 @@ class PaymentService {
             data: updateData
           });
 
-          // For card payment, check if it's successful and create subscription
           const finalStatus = chargeResult.charge?.status || chargeResult.status;
           const isSuccessful = paymentMethod === 'card' ? 
             (chargeResult.charge?.paid || (chargeResult.charge?.authorized && chargeResult.charge?.captured)) :
             finalStatus === 'successful';
 
           if (isSuccessful) {
-            // Update payment status to successful for immediate card payments
             if (paymentMethod === 'card') {
               await tx.payment.update({
                 where: { payment_id: paymentRecord.payment_id },
@@ -402,7 +384,6 @@ class PaymentService {
               });
             }
             
-            // Create subscription
             await this.createSubscriptionFromPayment(paymentRecord.payment_id, tx);
           }
 
@@ -417,7 +398,6 @@ class PaymentService {
             status: paymentMethod === 'card' && isSuccessful ? 'successful' : finalStatus
           };
 
-          // Add PromptPay specific data
           if (paymentMethod === 'promptpay') {
             response.qr_code_url = chargeResult.qr_code_url;
             response.expires_at = chargeResult.expires_at;
@@ -428,7 +408,6 @@ class PaymentService {
         } catch (chargeError) {
           console.error('Charge creation error:', chargeError);
           
-          // Update payment record with error status
           await tx.payment.update({
             where: { payment_id: paymentRecord.payment_id },
             data: {
@@ -452,20 +431,122 @@ class PaymentService {
     }
   }
 
-  // Handle webhook events
+  // Webhook handler with duplicate detection and logging
   async handleWebhook(event) {
     try {
       console.log('Processing webhook event:', event.key);
 
       const { data: charge } = event;
+      const chargeId = charge.id;
+      
+      // Check for duplicate webhook processing
+      const webhookKey = `${event.key}_${chargeId}_${charge.status}`;
+      if (this.recentWebhooks.has(webhookKey)) {
+        console.log('Duplicate webhook detected, skipping:', webhookKey);
+        return { processed: false, reason: 'Duplicate webhook', acknowledged: true };
+      }
+
+      // Add to cache with expiration
+      this.recentWebhooks.set(webhookKey, Date.now());
+      setTimeout(() => {
+        this.recentWebhooks.delete(webhookKey);
+      }, this.webhookCacheTimeout);
+
       const paymentId = charge.metadata?.payment_id;
 
       if (!paymentId) {
-        console.warn('No payment_id found in webhook metadata');
-        return;
+        console.warn('No payment_id found in webhook metadata for charge:', chargeId);
+        // Try to find payment by charge ID
+        const payment = await prisma.payment.findFirst({
+          where: { omise_charge_id: chargeId }
+        });
+        
+        if (!payment) {
+          console.error('No payment found for charge:', chargeId);
+          return { processed: false, reason: 'Payment not found', acknowledged: true };
+        }
       }
 
-      // Find payment record
+      // Find payment record with full details
+      const payment = await prisma.payment.findUnique({
+        where: paymentId ? { payment_id: paymentId } : { omise_charge_id: chargeId },
+        include: {
+          plan: true,
+          member: true,
+          subscription: true
+        }
+      });
+
+      if (!payment) {
+        console.error('Payment not found for webhook:', paymentId || chargeId);
+        return { processed: false, reason: 'Payment record not found', acknowledged: true };
+      }
+
+      const newStatus = this.mapOmiseStatusToLocal(charge.status);
+      const statusChanged = payment.status !== newStatus;
+      
+      console.log('Webhook processing details:', {
+        paymentId: payment.payment_id,
+        chargeId,
+        currentStatus: payment.status,
+        newStatus,
+        statusChanged,
+        eventType: event.key
+      });
+
+      // Process webhook in transaction
+      await prisma.$transaction(async (tx) => {
+        // Update payment status and Omise response
+        await tx.payment.update({
+          where: { payment_id: payment.payment_id },
+          data: {
+            status: newStatus,
+            omise_response: charge,
+            update_at: new Date()
+          }
+        });
+
+        // If payment became successful and no subscription exists, create one
+        if (charge.status === 'successful' && !payment.subscription) {
+          console.log('Creating subscription for successful payment:', payment.payment_id);
+          await this.createSubscriptionFromPayment(payment.payment_id, tx);
+        }
+
+        // If payment failed and subscription exists, mark it as cancelled
+        if ((charge.status === 'failed' || charge.status === 'expired') && payment.subscription) {
+          console.log('Updating subscription status for failed payment:', payment.payment_id);
+          await tx.subscription.update({
+            where: { payment_id: payment.payment_id },
+            data: {
+              status: 'cancelled',
+              update_at: new Date()
+            }
+          });
+        }
+      });
+
+      console.log('Webhook processed successfully for payment:', payment.payment_id);
+      
+      return { 
+        processed: true, 
+        statusChanged, 
+        paymentId: payment.payment_id,
+        chargeId,
+        previousStatus: payment.status,
+        newStatus
+      };
+      
+    } catch (error) {
+      console.error('Webhook processing failed:', error);
+      throw error;
+    }
+  }
+
+  // Refresh payment status from Omise API
+  async refreshPaymentFromOmise(paymentId) {
+    try {
+      console.log('Refreshing payment from Omise:', paymentId);
+      
       const payment = await prisma.payment.findUnique({
         where: { payment_id: paymentId },
         include: {
@@ -475,46 +556,166 @@ class PaymentService {
       });
 
       if (!payment) {
-        console.error('Payment not found for webhook:', paymentId);
-        return;
+        throw new Error('Payment not found');
       }
 
-      const newStatus = this.mapOmiseStatusToLocal(charge.status);
-      
-      // Update payment record in transaction
-      await prisma.$transaction(async (tx) => {
-        // Update payment status
-        await tx.payment.update({
+      if (!payment.omise_charge_id) {
+        throw new Error('No charge ID associated with this payment');
+      }
+
+      // Get latest status from Omise
+      const omiseCharge = await omise.charges.retrieve(payment.omise_charge_id);
+      console.log('Retrieved charge from Omise:', {
+        id: omiseCharge.id,
+        status: omiseCharge.status,
+        paid: omiseCharge.paid
+      });
+
+      const newStatus = this.mapOmiseStatusToLocal(omiseCharge.status);
+      const statusChanged = payment.status !== newStatus;
+
+      if (statusChanged) {
+        console.log('Payment status changed:', payment.status, '->', newStatus);
+        
+        // Update payment in transaction
+        const updatedPayment = await prisma.$transaction(async (tx) => {
+          const updated = await tx.payment.update({
+            where: { payment_id: paymentId },
+            data: {
+              status: newStatus,
+              omise_response: omiseCharge,
+              update_at: new Date()
+            }
+          });
+
+          // Handle subscription creation/updates
+          if (omiseCharge.status === 'successful') {
+            const existingSubscription = await tx.subscription.findFirst({
+              where: { payment_id: paymentId }
+            });
+
+            if (!existingSubscription) {
+              await this.createSubscriptionFromPayment(paymentId, tx);
+            }
+          }
+
+          return updated;
+        });
+
+        return updatedPayment;
+      } else {
+        console.log('Payment status unchanged:', newStatus);
+        
+        // Update last checked timestamp
+        const updatedPayment = await prisma.payment.update({
           where: { payment_id: paymentId },
           data: {
-            status: newStatus,
-            omise_response: charge,
+            omise_response: omiseCharge,
             update_at: new Date()
           }
         });
 
-        // If payment is successful and no subscription exists, create one
-        if (charge.status === 'successful') {
-          const existingSubscription = await tx.subscription.findFirst({
-            where: {
-              payment_id: paymentId
-            }
-          });
+        return updatedPayment;
+      }
 
-          if (!existingSubscription) {
-            await this.createSubscriptionFromPayment(paymentId, tx);
-          }
-        }
-      });
-
-      console.log('Webhook processed successfully for payment:', paymentId);
     } catch (error) {
-      console.error('Webhook processing failed:', error);
+      console.error('Failed to refresh payment from Omise:', error);
       throw error;
     }
   }
 
-  // Create subscription after successful payment with transaction support
+  // Polling with Omise integration
+  async pollPaymentStatusEnhanced(paymentId, maxAttempts = 60) {
+    let attempts = 0;
+    const pollInterval = 3000; // 3 seconds
+
+    return new Promise((resolve, reject) => {
+      const poll = async () => {
+        try {
+          attempts++;
+          console.log(`Enhanced polling attempt ${attempts}/${maxAttempts} for payment: ${paymentId}`);
+
+          // Get payment from database
+          const payment = await this.getPaymentStatus(paymentId);
+          
+          // Every 5th attempt, also check with Omise API for the latest status
+          if (payment.omise_charge_id && (attempts % 5 === 0 || attempts === 1)) {
+            try {
+              console.log('Checking with Omise API on attempt:', attempts);
+              await this.refreshPaymentFromOmise(paymentId);
+              // Get updated payment after refresh
+              const refreshedPayment = await this.getPaymentStatus(paymentId);
+              
+              if (refreshedPayment.status !== payment.status) {
+                console.log('Status updated from Omise:', payment.status, '->', refreshedPayment.status);
+                
+                // If successful, resolve immediately
+                if (refreshedPayment.status === 'successful') {
+                  return resolve({
+                    id: refreshedPayment.payment_id,
+                    status: refreshedPayment.status,
+                    amount: parseFloat(refreshedPayment.amount.toString()),
+                    currency: refreshedPayment.currency,
+                    paymentMethod: refreshedPayment.payment_method,
+                    planName: refreshedPayment.plan?.name,
+                    organization: refreshedPayment.plan?.owner?.org_name,
+                    attempts,
+                    lastChecked: new Date().toISOString()
+                  });
+                }
+                
+                // If failed or expired, reject
+                if (refreshedPayment.status === 'failed' || refreshedPayment.status === 'expired') {
+                  return reject(new Error(`Payment ${refreshedPayment.status}`));
+                }
+              }
+            } catch (omiseError) {
+              console.warn('Failed to check Omise API on attempt', attempts, ':', omiseError.message);
+            }
+          }
+          
+          // Check current status
+          if (payment.status === 'successful') {
+            console.log('Payment successful, stopping polling');
+            resolve({
+              id: payment.payment_id,
+              status: payment.status,
+              amount: parseFloat(payment.amount.toString()),
+              currency: payment.currency,
+              paymentMethod: payment.payment_method,
+              planName: payment.plan?.name,
+              organization: payment.plan?.owner?.org_name,
+              attempts,
+              lastChecked: new Date().toISOString()
+            });
+          } else if (payment.status === 'failed' || payment.status === 'expired') {
+            console.log(`Payment ${payment.status}, stopping polling`);
+            reject(new Error(`Payment ${payment.status}`));
+          } else if (attempts >= maxAttempts) {
+            console.log('Polling timeout reached');
+            reject(new Error('Payment verification timeout. Please check your payment status manually.'));
+          } else {
+            console.log(`Payment still ${payment.status}, continuing to poll... (${attempts}/${maxAttempts})`);
+            setTimeout(poll, pollInterval);
+          }
+        } catch (error) {
+          console.error(`Enhanced polling attempt ${attempts} failed:`, error);
+
+          if (attempts >= maxAttempts) {
+            reject(error);
+          } else {
+            // Retry after interval on error
+            setTimeout(poll, pollInterval);
+          }
+        }
+      };
+
+      // Start polling immediately
+      poll();
+    });
+  }
+
+  // Create subscription after successful payment
   async createSubscriptionFromPayment(paymentId, tx = null) {
     const prismaClient = tx || prisma;
     
@@ -533,9 +734,7 @@ class PaymentService {
 
       // Check if subscription already exists
       const existingSubscription = await prismaClient.subscription.findFirst({
-        where: {
-          payment_id: paymentId
-        }
+        where: { payment_id: paymentId }
       });
 
       if (existingSubscription) {
@@ -561,7 +760,15 @@ class PaymentService {
         }
       });
 
-      console.log('Subscription created:', subscription.subscription_id);
+      console.log('Subscription created successfully:', {
+        subscriptionId: subscription.subscription_id,
+        paymentId: paymentId,
+        planName: payment.plan.name,
+        memberName: payment.member.full_name,
+        duration: payment.plan.duration,
+        endDate: endDate.toISOString()
+      });
+
       return subscription;
     } catch (error) {
       console.error('Failed to create subscription from payment:', error);
@@ -577,7 +784,8 @@ class PaymentService {
       'failed': 'failed',
       'expired': 'expired',
       'reversed': 'refunded',
-      'voided': 'failed'
+      'voided': 'failed',
+      'completed': 'successful'
     };
     return statusMap[omiseStatus] || 'pending';
   }
@@ -627,7 +835,7 @@ class PaymentService {
     }
   }
 
-  // Get member's payment history
+  // Member payment history
   async getMemberPaymentHistory(memberId) {
     try {
       const payments = await prisma.payment.findMany({
@@ -675,7 +883,10 @@ class PaymentService {
           endDate: payment.subscription.end_date
         } : null,
         createdAt: payment.create_at,
-        updatedAt: payment.update_at
+        updatedAt: payment.update_at,
+        omiseChargeId: payment.omise_charge_id,
+        canRefresh: payment.status === 'pending' && !!payment.omise_charge_id,
+        metadata: payment.metadata
       }));
     } catch (error) {
       console.error('Failed to get payment history:', error);
@@ -683,84 +894,9 @@ class PaymentService {
     }
   }
 
-  // Poll payment status for PromptPay payments
+  // Payment status polling
   async pollPaymentStatus(paymentId, maxAttempts = 60) {
-    let attempts = 0;
-
-    return new Promise((resolve, reject) => {
-      const poll = async () => {
-        try {
-          attempts++;
-          console.log(`Polling payment status attempt ${attempts}/${maxAttempts} for payment: ${paymentId}`);
-
-          // Get payment from database first
-          const payment = await this.getPaymentStatus(paymentId);
-          
-          // Also check with Omise API if we have charge ID
-          if (payment.omise_charge_id && attempts % 5 === 0) { // Check every 5th attempt
-            try {
-              const omiseCharge = await omise.charges.retrieve(payment.omise_charge_id);
-              console.log('Omise charge status:', omiseCharge.status);
-              
-              // Update local status if different
-              if (this.mapOmiseStatusToLocal(omiseCharge.status) !== payment.status) {
-                await prisma.payment.update({
-                  where: { payment_id: paymentId },
-                  data: {
-                    status: this.mapOmiseStatusToLocal(omiseCharge.status),
-                    omise_response: omiseCharge,
-                    update_at: new Date()
-                  }
-                });
-                // Refresh payment data
-                const updatedPayment = await this.getPaymentStatus(paymentId);
-                if (updatedPayment.status === 'successful') {
-                  await this.createSubscriptionFromPayment(paymentId);
-                }
-                return poll(); // Check again immediately
-              }
-            } catch (omiseError) {
-              console.warn('Failed to check Omise charge status:', omiseError.message);
-            }
-          }
-          
-          if (payment.status === 'successful') {
-            console.log('Payment successful, stopping polling');
-            resolve({
-              id: payment.payment_id,
-              status: payment.status,
-              amount: parseFloat(payment.amount.toString()),
-              currency: payment.currency,
-              paymentMethod: payment.payment_method,
-              planName: payment.plan.name,
-              organization: payment.plan.owner.org_name
-            });
-          } else if (payment.status === 'failed' || payment.status === 'expired') {
-            console.log(`Payment ${payment.status}, stopping polling`);
-            reject(new Error(`Payment ${payment.status}`));
-          } else if (attempts >= maxAttempts) {
-            console.log('Polling timeout reached');
-            reject(new Error('Payment verification timeout. Please check your payment status manually.'));
-          } else {
-            // Continue polling after 3 seconds for PromptPay
-            console.log(`Payment still ${payment.status}, continuing to poll...`);
-            setTimeout(poll, 3000);
-          }
-        } catch (error) {
-          console.error(`Polling attempt ${attempts} failed:`, error);
-
-          if (attempts >= maxAttempts) {
-            reject(error);
-          } else {
-            // Retry after 3 seconds on error
-            setTimeout(poll, 3000);
-          }
-        }
-      };
-
-      // Start polling immediately
-      poll();
-    });
+    return this.pollPaymentStatusEnhanced(paymentId, maxAttempts);
   }
 
   // Validate payment data
@@ -790,7 +926,7 @@ class PaymentService {
     return true;
   }
 
-  // Get charge from Omise API
+  // Get charge from Omise API with error handling
   async getChargeFromOmise(chargeId) {
     try {
       const charge = await omise.charges.retrieve(chargeId);
@@ -799,6 +935,64 @@ class PaymentService {
       console.error('Failed to retrieve charge from Omise:', error);
       throw error;
     }
+  }
+
+  // Get payment statistics for monitoring
+  async getPaymentStatistics(memberId = null) {
+    try {
+      const whereClause = memberId ? { member_id: memberId } : {};
+      
+      const stats = await prisma.payment.groupBy({
+        by: ['status', 'payment_method'],
+        where: whereClause,
+        _count: {
+          payment_id: true
+        },
+        _sum: {
+          amount: true
+        }
+      });
+
+      const totalPayments = await prisma.payment.count({ where: whereClause });
+      const totalAmount = await prisma.payment.aggregate({
+        where: { ...whereClause, status: 'successful' },
+        _sum: { amount: true }
+      });
+
+      return {
+        totalPayments,
+        totalSuccessfulAmount: parseFloat(totalAmount._sum.amount?.toString() || '0'),
+        breakdown: stats.map(stat => ({
+          status: stat.status,
+          paymentMethod: stat.payment_method,
+          count: stat._count.payment_id,
+          totalAmount: parseFloat(stat._sum.amount?.toString() || '0')
+        }))
+      };
+    } catch (error) {
+      console.error('Failed to get payment statistics:', error);
+      throw error;
+    }
+  }
+
+  // Cleanup old webhook cache entries
+  cleanupWebhookCache() {
+    const now = Date.now();
+    for (const [key, timestamp] of this.recentWebhooks.entries()) {
+      if (now - timestamp > this.webhookCacheTimeout) {
+        this.recentWebhooks.delete(key);
+      }
+    }
+  }
+
+  // Get webhook processing status
+  getWebhookCacheStatus() {
+    this.cleanupWebhookCache();
+    return {
+      cachedWebhooks: this.recentWebhooks.size,
+      cacheTimeout: this.webhookCacheTimeout,
+      lastCleanup: new Date().toISOString()
+    };
   }
 }
 

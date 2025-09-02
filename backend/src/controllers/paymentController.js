@@ -200,6 +200,7 @@ class PaymentController {
 
       console.log('Getting payment status:', paymentId);
 
+      // Get payment from service with full details
       const payment = await this.paymentService.getPaymentStatus(paymentId.trim());
 
       // Verify payment belongs to the requesting member
@@ -208,6 +209,16 @@ class PaymentController {
           success: false,
           message: 'Access denied'
         });
+      }
+
+      // Check Omise for latest status if payment is pending
+      if (payment.status === 'pending' && payment.omise_charge_id) {
+        try {
+          const latestOmiseStatus = await this.paymentService.refreshPaymentFromOmise(paymentId.trim());
+          console.log('Updated payment status from Omise:', latestOmiseStatus.status);
+        } catch (omiseError) {
+          console.warn('Could not refresh from Omise:', omiseError.message);
+        }
       }
 
       // Calculate days remaining for active subscriptions
@@ -235,7 +246,9 @@ class PaymentController {
           daysRemaining
         } : null,
         createdAt: payment.create_at,
-        updatedAt: payment.update_at
+        updatedAt: payment.update_at,
+        omiseChargeId: payment.omise_charge_id,
+        lastChecked: new Date().toISOString()
       };
 
       res.json({
@@ -281,7 +294,32 @@ class PaymentController {
         });
       }
 
+      // Get payment history with details
       let payments = await this.paymentService.getMemberPaymentHistory(memberId);
+
+      // Check for any pending payments and refresh their status from Omise
+      const pendingPayments = payments.filter(p => p.status === 'pending');
+      if (pendingPayments.length > 0) {
+        console.log(`Found ${pendingPayments.length} pending payments, checking Omise for updates`);
+        
+        // Refresh pending payments from Omise
+        const refreshPromises = pendingPayments.slice(0, 5).map(async (payment) => {
+          try {
+            await this.paymentService.refreshPaymentFromOmise(payment.id);
+          } catch (err) {
+            console.warn(`Failed to refresh payment ${payment.id} from Omise:`, err.message);
+          }
+        });
+        
+        // Wait for up to 2 seconds for refreshes
+        await Promise.race([
+          Promise.allSettled(refreshPromises),
+          new Promise(resolve => setTimeout(resolve, 2000))
+        ]);
+        
+        // Reload payment history to get updated data
+        payments = await this.paymentService.getMemberPaymentHistory(memberId);
+      }
 
       // Filter by status if provided
       if (status) {
@@ -292,6 +330,13 @@ class PaymentController {
       const total = payments.length;
       const paginatedPayments = payments.slice(offsetNum, offsetNum + limitNum);
 
+      // Add metadata for client-side optimization
+      const responseMetadata = {
+        hasUpdates: pendingPayments.length > 0,
+        lastRefreshTime: new Date().toISOString(),
+        pendingCount: payments.filter(p => p.status === 'pending').length
+      };
+
       res.json({
         success: true,
         data: paginatedPayments,
@@ -300,7 +345,8 @@ class PaymentController {
           limit: limitNum,
           offset: offsetNum,
           hasMore: offsetNum + limitNum < total
-        }
+        },
+        metadata: responseMetadata
       });
 
     } catch (error) {
@@ -314,72 +360,125 @@ class PaymentController {
     }
   });
 
-  // Handle Omise webhook
+  // Webhook handler with error handling and logging
   handleWebhook = asyncHandler(async (req, res) => {
+    const startTime = Date.now();
+    
     try {
-      console.log('PaymentController: Webhook received');
-      console.log('Webhook headers:', {
+      console.log('=== OMISE WEBHOOK RECEIVED ===');
+      console.log('Timestamp:', new Date().toISOString());
+      console.log('Headers:', {
         'content-type': req.headers['content-type'],
         'user-agent': req.headers['user-agent'],
-        'omise-signature': req.headers['omise-signature'] ? 'Present' : 'Missing'
-      });
-      console.log('Webhook event type:', req.body.key);
-      console.log('Webhook data preview:', {
-        key: req.body.key,
-        hasData: !!req.body.data,
-        dataId: req.body.data?.id,
-        dataObject: req.body.data?.object
+        'omise-signature': req.headers['omise-signature'] ? 'Present' : 'Missing',
+        'content-length': req.headers['content-length']
       });
       
       const event = req.body;
-
+      console.log('Event type:', event.key);
+      console.log('Event data preview:', {
+        key: event.key,
+        hasData: !!event.data,
+        dataId: event.data?.id,
+        dataObject: event.data?.object,
+        dataStatus: event.data?.status,
+        dataAmount: event.data?.amount,
+        dataCurrency: event.data?.currency
+      });
+      
       // Validate webhook event structure
       if (!event.key || !event.data) {
         console.error('Invalid webhook event structure');
         return res.status(400).json({ 
           received: false, 
-          error: 'Invalid event structure' 
+          error: 'Invalid event structure',
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      // Validate charge data
+      const charge = event.data;
+      if (!charge.id || !charge.object || charge.object !== 'charge') {
+        console.error('Invalid charge data in webhook');
+        return res.status(400).json({ 
+          received: false, 
+          error: 'Invalid charge data',
+          timestamp: new Date().toISOString()
         });
       }
 
       // Process webhook based on event type
+      let processingResult = null;
+      
       switch (event.key) {
         case 'charge.complete':
         case 'charge.successful':
-          console.log('Processing successful charge webhook');
-          await this.paymentService.handleWebhook(event);
+          console.log('Processing successful charge webhook for:', charge.id);
+          processingResult = await this.paymentService.handleWebhook(event);
           break;
+          
         case 'charge.failed':
-        case 'charge.expired':
-          console.log('Processing failed/expired charge webhook');
-          await this.paymentService.handleWebhook(event);
+          console.log('Processing failed charge webhook for:', charge.id);
+          processingResult = await this.paymentService.handleWebhook(event);
           break;
+          
+        case 'charge.expired':
+          console.log('Processing expired charge webhook for:', charge.id);
+          processingResult = await this.paymentService.handleWebhook(event);
+          break;
+          
+        case 'charge.pending':
+          console.log('Processing pending charge webhook for:', charge.id);
+          processingResult = await this.paymentService.handleWebhook(event);
+          break;
+          
         default:
           console.log('Unhandled webhook event type:', event.key);
-          // Still acknowledge receipt
+          processingResult = { 
+            processed: false, 
+            reason: 'Unhandled event type',
+            acknowledged: true
+          };
           break;
       }
 
-      console.log('Webhook processed successfully');
+      const processingTime = Date.now() - startTime;
+      console.log('Webhook processed successfully in', processingTime, 'ms');
+      console.log('Processing result:', processingResult);
+      console.log('=== WEBHOOK PROCESSING COMPLETE ===\n');
+
       res.status(200).json({ 
         received: true,
-        processed: true
+        processed: processingResult?.processed !== false,
+        charge_id: charge.id,
+        event_type: event.key,
+        processing_time_ms: processingTime,
+        timestamp: new Date().toISOString(),
+        result: processingResult
       });
 
     } catch (error) {
-      console.error('PaymentController webhook error:', error);
+      const processingTime = Date.now() - startTime;
+      console.error('=== WEBHOOK PROCESSING ERROR ===');
+      console.error('Processing time:', processingTime, 'ms');
+      console.error('Error:', error.message);
+      console.error('Stack:', error.stack);
+      console.error('Event data:', req.body);
+      console.error('=== END WEBHOOK ERROR ===\n');
       
       // Always return success to prevent webhook retries for our errors
       // But log the error for debugging
       res.status(200).json({ 
         received: true,
         processed: false,
-        error: 'Processing failed but acknowledged'
+        error: 'Processing failed but acknowledged',
+        processing_time_ms: processingTime,
+        timestamp: new Date().toISOString()
       });
     }
   });
 
-  // Poll payment status for PromptPay
+  // Poll payment status for PromptPay with monitoring
   pollPaymentStatus = asyncHandler(async (req, res) => {
     try {
       const { paymentId } = req.params;
@@ -407,8 +506,8 @@ class PaymentController {
         });
       }
 
-      // Start polling
-      const result = await this.paymentService.pollPaymentStatus(
+      // Polling with Omise status checks
+      const result = await this.paymentService.pollPaymentStatusEnhanced(
         paymentId.trim(), 
         maxAttemptsNum
       );
@@ -487,7 +586,7 @@ class PaymentController {
     }
   });
 
-  // Validate payment before processing (utility endpoint)
+  // Validate payment before processing
   validatePayment = asyncHandler(async (req, res) => {
     try {
       const { planId, paymentMethod, amount, paymentSource } = req.body;
@@ -548,6 +647,114 @@ class PaymentController {
       res.status(500).json({
         success: false,
         message: 'Validation failed'
+      });
+    }
+  });
+
+  // Refresh payment status from Omise
+  refreshPaymentFromOmise = asyncHandler(async (req, res) => {
+    try {
+      const { paymentId } = req.params;
+      const memberId = req.user.userId;
+
+      if (!paymentId || paymentId.trim() === '') {
+        return res.status(400).json({
+          success: false,
+          message: 'Payment ID is required'
+        });
+      }
+
+      console.log('Manual refresh payment from Omise:', paymentId);
+
+      // Verify payment belongs to member
+      const payment = await this.paymentService.getPaymentStatus(paymentId.trim());
+      if (payment.member_id !== memberId) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied'
+        });
+      }
+
+      // Refresh from Omise
+      const updatedPayment = await this.paymentService.refreshPaymentFromOmise(paymentId.trim());
+
+      res.json({
+        success: true,
+        data: {
+          id: updatedPayment.payment_id,
+          previousStatus: payment.status,
+          currentStatus: updatedPayment.status,
+          updated: payment.status !== updatedPayment.status,
+          lastChecked: new Date().toISOString()
+        },
+        message: payment.status !== updatedPayment.status 
+          ? `Payment status updated from ${payment.status} to ${updatedPayment.status}`
+          : 'Payment status unchanged'
+      });
+
+    } catch (error) {
+      console.error('PaymentController refresh payment from Omise error:', error);
+      
+      let statusCode = 500;
+      let message = 'Failed to refresh payment status';
+
+      if (error.message.includes('Payment not found')) {
+        statusCode = 404;
+        message = 'Payment not found';
+      } else if (error.message.includes('No charge ID')) {
+        statusCode = 400;
+        message = 'Payment does not have an associated Omise charge';
+      }
+      
+      res.status(statusCode).json({
+        success: false,
+        message,
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  });
+
+  // Get webhook logs for debugging
+  getWebhookLogs = asyncHandler(async (req, res) => {
+    try {
+      // Only allow in development mode
+      if (process.env.NODE_ENV !== 'development') {
+        return res.status(403).json({
+          success: false,
+          message: 'Webhook logs only available in development mode'
+        });
+      }
+
+      const { limit = 50 } = req.query;
+      const limitNum = Math.min(parseInt(limit) || 50, 100);
+
+      // Return a placeholder response
+      const mockLogs = [
+        {
+          id: '1',
+          timestamp: new Date().toISOString(),
+          event_type: 'charge.successful',
+          charge_id: 'chrg_test_123',
+          processing_time_ms: 150,
+          status: 'processed'
+        }
+      ];
+
+      res.json({
+        success: true,
+        data: mockLogs.slice(0, limitNum),
+        pagination: {
+          total: mockLogs.length,
+          limit: limitNum,
+          offset: 0
+        }
+      });
+
+    } catch (error) {
+      console.error('PaymentController get webhook logs error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get webhook logs'
       });
     }
   });
