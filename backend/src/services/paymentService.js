@@ -19,7 +19,7 @@ class PaymentService {
     try {
       console.log('Creating Omise charge:', { amount, currency, description });
 
-      // Validate amount (must be positive integer in satang)
+      // Validate amount
       const amountInSatang = Math.round(amount * 100);
       if (amountInSatang <= 0) {
         throw new Error('Invalid amount: must be greater than 0');
@@ -80,27 +80,42 @@ class PaymentService {
 
       // Validate amount
       const amountInSatang = Math.round(amount * 100);
-      if (amountInSatang <= 0) {
-        throw new Error('Invalid amount: must be greater than 0');
+      if (amountInSatang <= 0 || amountInSatang < 2000) { // Minimum 20 THB for PromptPay
+        throw new Error('Invalid amount: must be at least 20 THB');
       }
 
-      // Create PromptPay source first
+      console.log('Amount in satang:', amountInSatang);
+
+      // Create PromptPay source first using SECRET KEY
       const source = await omise.sources.create({
         type: 'promptpay',
         amount: amountInSatang,
         currency: 'THB',
       });
 
-      if (!source.scannable_code || !source.scannable_code.image) {
-        throw new Error('Failed to generate QR code');
+      console.log('PromptPay source created:', {
+        id: source.id,
+        type: source.type,
+        amount: source.amount,
+        currency: source.currency,
+        has_scannable_code: !!source.scannable_code
+      });
+
+      // Check if source creation was successful
+      if (!source || !source.id) {
+        throw new Error('Failed to create PromptPay source');
       }
+
+      // Wait a moment for source to be ready
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       // Create charge with the source
       const charge = await omise.charges.create({
         amount: amountInSatang,
         currency: 'THB',
-        description,
+        description: description || 'PromptPay Payment',
         source: source.id,
+        capture: false, // PromptPay is always manual capture
         metadata: {
           ...metadata,
           customer_id: customerId,
@@ -111,17 +126,84 @@ class PaymentService {
 
       console.log('PromptPay charge created:', {
         id: charge.id,
-        source_id: source.id,
-        status: charge.status
+        source_id: charge.source?.id,
+        status: charge.status,
+        amount: charge.amount,
+        authorized: charge.authorized,
+        paid: charge.paid
       });
+
+      // Get QR code - it should be in the source object
+      let qrCodeUrl = null;
+      let expiresAt = null;
+
+      if (source.scannable_code && source.scannable_code.image) {
+        qrCodeUrl = source.scannable_code.image.download_uri;
+      } else if (charge.source && charge.source.scannable_code && charge.source.scannable_code.image) {
+        qrCodeUrl = charge.source.scannable_code.image.download_uri;
+      }
+
+      if (source.expires_at) {
+        expiresAt = source.expires_at;
+      } else if (charge.source && charge.source.expires_at) {
+        expiresAt = charge.source.expires_at;
+      }
+
+      if (!qrCodeUrl) {
+        console.warn('No QR code found in source response');
+        // Try to retrieve the source again
+        try {
+          const retrievedSource = await omise.sources.retrieve(source.id);
+          console.log('Retrieved source:', retrievedSource);
+          if (retrievedSource.scannable_code && retrievedSource.scannable_code.image) {
+            qrCodeUrl = retrievedSource.scannable_code.image.download_uri;
+          }
+        } catch (retrieveError) {
+          console.error('Failed to retrieve source:', retrieveError);
+        }
+      }
+
+      if (!qrCodeUrl) {
+        throw new Error('Failed to generate QR code for PromptPay payment');
+      }
+
+      console.log('QR code URL generated:', qrCodeUrl ? 'Yes' : 'No');
 
       return {
         charge,
-        qr_code_url: source.scannable_code.image.download_uri,
-        expires_at: source.expires_at
+        source,
+        qr_code_url: qrCodeUrl,
+        expires_at: expiresAt
       };
     } catch (error) {
       console.error('PromptPay charge creation failed:', error);
+      
+      // Log detailed error information
+      if (error.response) {
+        console.error('Omise API Error Response:', {
+          status: error.response.status,
+          data: error.response.data,
+          headers: error.response.headers
+        });
+      }
+      
+      if (error.code) {
+        console.error('Omise Error Code:', error.code);
+      }
+
+      // More specific error handling for PromptPay
+      if (error.message && error.message.includes('amount')) {
+        throw new Error('Invalid payment amount. PromptPay requires minimum 20 THB.');
+      }
+      
+      if (error.message && error.message.includes('currency')) {
+        throw new Error('PromptPay only supports THB currency.');
+      }
+
+      if (error.message && error.message.includes('type')) {
+        throw new Error('PromptPay payment method is not available.');
+      }
+
       throw new Error(`PromptPay payment failed: ${error.message}`);
     }
   }
@@ -177,6 +259,12 @@ class PaymentService {
       }
 
       const amount = parseFloat(plan.price.toString());
+      
+      // Validate minimum amount for PromptPay
+      if (paymentMethod === 'promptpay' && amount < 20) {
+        throw new Error('PromptPay requires minimum payment of 20 THB');
+      }
+
       const description = `Subscription: ${plan.name} - ${plan.owner.org_name}`;
 
       // Start transaction
@@ -239,18 +327,24 @@ class PaymentService {
           }
 
           // Update payment record with charge info
+          const updateData = {
+            omise_charge_id: chargeResult.charge?.id || chargeResult.id,
+            status: this.mapOmiseStatusToLocal(chargeResult.charge?.status || chargeResult.status),
+            omise_response: chargeResult.charge || chargeResult,
+            update_at: new Date()
+          };
+
+          // Add source info for PromptPay
+          if (paymentMethod === 'promptpay' && chargeResult.source) {
+            updateData.omise_source_id = chargeResult.source.id;
+          }
+
           await tx.payment.update({
             where: { payment_id: paymentRecord.payment_id },
-            data: {
-              omise_charge_id: chargeResult.charge?.id || chargeResult.id,
-              omise_source_id: chargeResult.charge?.source?.id || chargeResult.source,
-              status: this.mapOmiseStatusToLocal(chargeResult.charge?.status || chargeResult.status),
-              omise_response: chargeResult.charge || chargeResult,
-              update_at: new Date()
-            }
+            data: updateData
           });
 
-          // If payment is immediately successful (card payments), create subscription
+          // If card payment is immediately successful, create subscription
           const finalStatus = chargeResult.charge?.status || chargeResult.status;
           if (finalStatus === 'successful') {
             await this.createSubscriptionFromPayment(paymentRecord.payment_id, tx);
@@ -258,26 +352,36 @@ class PaymentService {
 
           console.log('Subscription payment processed:', paymentRecord.payment_id);
 
-          return {
+          const response = {
             success: true,
             paymentId: paymentRecord.payment_id,
             chargeId: chargeResult.charge?.id || chargeResult.id,
             amount,
             currency: 'THB',
-            status: finalStatus,
-            ...(paymentMethod === 'promptpay' && {
-              qr_code_url: chargeResult.qr_code_url,
-              expires_at: chargeResult.expires_at
-            })
+            status: finalStatus
           };
 
+          // Add PromptPay specific data
+          if (paymentMethod === 'promptpay') {
+            response.qr_code_url = chargeResult.qr_code_url;
+            response.expires_at = chargeResult.expires_at;
+          }
+
+          return response;
+
         } catch (chargeError) {
+          console.error('Charge creation error:', chargeError);
+          
           // Update payment record with error status
           await tx.payment.update({
             where: { payment_id: paymentRecord.payment_id },
             data: {
               status: 'failed',
-              omise_response: { error: chargeError.message },
+              omise_response: { 
+                error: chargeError.message,
+                error_code: chargeError.code,
+                timestamp: new Date().toISOString()
+              },
               update_at: new Date()
             }
           });
@@ -535,6 +639,34 @@ class PaymentService {
 
           // Get payment from database first
           const payment = await this.getPaymentStatus(paymentId);
+          
+          // Also check with Omise API if we have charge ID
+          if (payment.omise_charge_id && attempts % 5 === 0) { // Check every 5th attempt
+            try {
+              const omiseCharge = await omise.charges.retrieve(payment.omise_charge_id);
+              console.log('Omise charge status:', omiseCharge.status);
+              
+              // Update local status if different
+              if (this.mapOmiseStatusToLocal(omiseCharge.status) !== payment.status) {
+                await prisma.payment.update({
+                  where: { payment_id: paymentId },
+                  data: {
+                    status: this.mapOmiseStatusToLocal(omiseCharge.status),
+                    omise_response: omiseCharge,
+                    update_at: new Date()
+                  }
+                });
+                // Refresh payment data
+                const updatedPayment = await this.getPaymentStatus(paymentId);
+                if (updatedPayment.status === 'successful') {
+                  await this.createSubscriptionFromPayment(paymentId);
+                }
+                return poll(); // Check again immediately
+              }
+            } catch (omiseError) {
+              console.warn('Failed to check Omise charge status:', omiseError.message);
+            }
+          }
           
           if (payment.status === 'successful') {
             console.log('Payment successful, stopping polling');

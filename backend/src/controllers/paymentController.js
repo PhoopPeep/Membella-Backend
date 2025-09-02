@@ -1,4 +1,3 @@
-// backend/src/controllers/paymentController.js - ENHANCED VERSION
 const PaymentService = require('../services/paymentService');
 const { asyncHandler } = require('../utils/errorHandler');
 
@@ -29,7 +28,7 @@ class PaymentController {
         });
       }
 
-      console.log('Providing Omise public key to frontend');
+      console.log('Providing Omise public key to frontend:', publicKey.substring(0, 15) + '...');
       
       res.json({
         success: true,
@@ -48,16 +47,23 @@ class PaymentController {
   createSubscriptionPayment = asyncHandler(async (req, res) => {
     try {
       console.log('PaymentController: Create subscription payment request received');
+      console.log('Request headers:', {
+        'content-type': req.headers['content-type'],
+        'authorization': req.headers.authorization ? 'Present' : 'Missing',
+        'user-agent': req.headers['user-agent']
+      });
       console.log('Request body:', {
         ...req.body,
         paymentSource: req.body.paymentSource ? '[REDACTED]' : 'null'
       });
+      console.log('User from token:', req.user);
       
       const memberId = req.user.userId;
       const { planId, paymentMethod, paymentSource, customerData } = req.body;
 
-      // Enhanced validation
+      // Validation
       if (!planId || typeof planId !== 'string' || planId.trim() === '') {
+        console.error('Validation failed: Invalid planId:', planId);
         return res.status(400).json({
           success: false,
           message: 'Plan ID is required'
@@ -65,6 +71,7 @@ class PaymentController {
       }
 
       if (!paymentMethod || !['card', 'promptpay'].includes(paymentMethod)) {
+        console.error('Validation failed: Invalid paymentMethod:', paymentMethod);
         return res.status(400).json({
           success: false,
           message: 'Valid payment method is required (card or promptpay)'
@@ -73,6 +80,7 @@ class PaymentController {
 
       if (paymentMethod === 'card') {
         if (!paymentSource || typeof paymentSource !== 'string' || paymentSource.trim() === '') {
+          console.error('Validation failed: Missing paymentSource for card payment');
           return res.status(400).json({
             success: false,
             message: 'Payment source token is required for card payments'
@@ -81,6 +89,7 @@ class PaymentController {
 
         // Validate token format (Omise tokens start with 'tokn_')
         if (!paymentSource.startsWith('tokn_')) {
+          console.error('Validation failed: Invalid token format:', paymentSource.substring(0, 10));
           return res.status(400).json({
             success: false,
             message: 'Invalid payment token format'
@@ -91,6 +100,7 @@ class PaymentController {
       // Validate customer data for card payments
       if (paymentMethod === 'card' && customerData) {
         if (customerData.name && (typeof customerData.name !== 'string' || customerData.name.trim() === '')) {
+          console.error('Validation failed: Invalid customer name');
           return res.status(400).json({
             success: false,
             message: 'Valid cardholder name is required'
@@ -98,7 +108,7 @@ class PaymentController {
         }
       }
 
-      console.log('Processing subscription payment:', { 
+      console.log('Validation passed. Processing subscription payment:', { 
         memberId, 
         planId: planId.trim(), 
         paymentMethod 
@@ -115,7 +125,8 @@ class PaymentController {
       console.log('Payment processed successfully:', {
         paymentId: result.paymentId,
         status: result.status,
-        amount: result.amount
+        amount: result.amount,
+        hasQrCode: !!result.qr_code_url
       });
 
       res.status(201).json({
@@ -126,6 +137,7 @@ class PaymentController {
 
     } catch (error) {
       console.error('PaymentController subscription payment error:', error);
+      console.error('Error stack:', error.stack);
       
       // Handle specific error types
       let statusCode = 500;
@@ -149,15 +161,23 @@ class PaymentController {
       } else if (error.message.includes('expired') || error.message.includes('stolen')) {
         statusCode = 400;
         message = error.message;
-      } else if (error.message.includes('amount')) {
+      } else if (error.message.includes('amount') || error.message.includes('minimum')) {
         statusCode = 400;
-        message = 'Invalid payment amount';
+        message = error.message;
+      } else if (error.message.includes('PromptPay')) {
+        statusCode = 400;
+        message = error.message;
       }
+
+      console.error('Sending error response:', { statusCode, message });
 
       res.status(statusCode).json({
         success: false,
         message,
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        error: process.env.NODE_ENV === 'development' ? {
+          original: error.message,
+          stack: error.stack
+        } : undefined
       });
     }
   });
@@ -287,7 +307,9 @@ class PaymentController {
   handleWebhook = asyncHandler(async (req, res) => {
     try {
       console.log('PaymentController: Webhook received');
+      console.log('Webhook headers:', req.headers);
       console.log('Webhook event type:', req.body.key);
+      console.log('Webhook data:', JSON.stringify(req.body, null, 2));
       
       // Verify webhook signature if needed
       // const signature = req.headers['omise-signature'];
@@ -307,10 +329,12 @@ class PaymentController {
       switch (event.key) {
         case 'charge.complete':
         case 'charge.successful':
+          console.log('Processing successful charge webhook');
           await this.paymentService.handleWebhook(event);
           break;
         case 'charge.failed':
         case 'charge.expired':
+          console.log('Processing failed/expired charge webhook');
           await this.paymentService.handleWebhook(event);
           break;
         default:
