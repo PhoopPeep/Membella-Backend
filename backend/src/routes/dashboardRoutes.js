@@ -14,5 +14,6 @@ router.get('/revenue', apiRateLimiter, dashboardController.getRevenueData);
 router.get('/members', apiRateLimiter, dashboardController.getMembers);
 router.get('/members-by-plan', apiRateLimiter, dashboardController.getMembersByPlan);
 router.get('/plans/:planId/members', apiRateLimiter, dashboardController.getPlanMembers);
+router.delete('/members/:memberId', apiRateLimiter, dashboardController.deleteMember);
 
 module.exports = router;

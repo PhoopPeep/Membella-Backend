@@ -327,6 +327,81 @@ class DashboardController {
     res.json(transformedMembers);
   });
 
+  // Delete a member
+  deleteMember = asyncHandler(async (req, res) => {
+    const ownerId = req.user.userId;
+    const { memberId } = req.params;
+
+    console.log('Deleting member:', memberId, 'for owner:', ownerId);
+
+    // First, verify that the member belongs to this owner's plans
+    const member = await prisma.member.findFirst({
+      where: {
+        member_id: memberId,
+        subscriptions: {
+          some: {
+            plan: {
+              owner_id: ownerId
+            }
+          }
+        }
+      },
+      include: {
+        subscriptions: {
+          where: {
+            plan: {
+              owner_id: ownerId
+            }
+          }
+        }
+      }
+    });
+
+    if (!member) {
+      return res.status(404).json({ 
+        message: 'Member not found or does not belong to your plans' 
+      });
+    }
+
+    // Delete member's subscriptions first (cascade delete)
+    await prisma.subscription.deleteMany({
+      where: {
+        member_id: memberId,
+        plan: {
+          owner_id: ownerId
+        }
+      }
+    });
+
+    // Delete member's payments
+    await prisma.payment.deleteMany({
+      where: {
+        member_id: memberId,
+        plan: {
+          owner_id: ownerId
+        }
+      }
+    });
+
+    // Finally, delete the member
+    await prisma.member.delete({
+      where: {
+        member_id: memberId
+      }
+    });
+
+    console.log(`Member ${memberId} deleted successfully`);
+
+    res.json({ 
+      message: 'Member deleted successfully',
+      deletedMember: {
+        id: member.member_id,
+        email: member.email,
+        fullName: member.full_name
+      }
+    });
+  });
+
   // Helper methods for revenue calculation
   async calculateMonthlyRevenue(ownerId, startDate, endDate) {
     const subscriptions = await prisma.subscription.findMany({

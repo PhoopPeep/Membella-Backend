@@ -493,6 +493,176 @@ class MemberAuthService {
       throw new AuthenticationError('Invalid or expired token');
     }
   }
+
+  // Forgot password - send email with reset link
+  async forgotPassword(email) {
+    try {
+      console.log('Sending member password reset email to:', email);
+      
+      // Check that email exists in the database
+      const member = await this.prisma.member.findUnique({
+        where: { email: email.toLowerCase().trim() }
+      });
+      
+      if (!member) {
+        // Return error if email does not exist in the system
+        return {
+          success: false,
+          message: 'Email not found in our system.',
+          rateLimited: false
+        };
+      }
+
+      // Send password reset email via Supabase
+      const { data, error } = await this.supabase.auth.resetPasswordForEmail(
+        email.toLowerCase().trim(),
+        {
+          redirectTo: `${process.env.MEMBER_FRONTEND_URL}/reset-password`
+        }
+      );
+
+      if (error) {
+        console.error('Member password reset email error:', error);
+        
+        if (error.message.includes('rate limit') || error.message.includes('Email rate limit exceeded')) {
+          return {
+            success: false,
+            message: 'Too many password reset attempts. Please wait at least 60 seconds before trying again.',
+            rateLimited: true
+          };
+        }
+        
+        return {
+          success: false,
+          message: `Failed to send password reset email: ${error.message}`,
+          rateLimited: false
+        };
+      }
+
+      console.log('Member password reset email sent successfully:', data);
+
+      return {
+        success: true,
+        message: 'Password reset link has been sent to your email. Please check your inbox and spam folder.',
+        rateLimited: false
+      };
+    } catch (error) {
+      console.error('Member forgot password service error:', error);
+      
+      return {
+        success: false,
+        message: 'An unexpected error occurred. Please try again.',
+        rateLimited: false
+      };
+    }
+  }
+
+  // Reset password using access token
+  async resetPassword(accessToken, newPassword) {
+    try {
+      console.log('Resetting member password with access token');
+      
+      // Use Supabase to reset password
+      const { data, error } = await this.supabase.auth.updateUser({
+        password: newPassword
+      });
+
+      if (error) {
+        console.error('Member password reset error:', error);
+        
+        if (error.message.includes('rate limit') || error.message.includes('Too many')) {
+          return {
+            success: false,
+            message: 'Too many attempts. Please wait a few minutes before trying again.',
+            rateLimited: true
+          };
+        }
+        
+        return {
+          success: false,
+          message: `Failed to reset password: ${error.message}`,
+          rateLimited: false
+        };
+      }
+
+      console.log('Member password reset successful:', data);
+
+      return {
+        success: true,
+        message: 'Password has been reset successfully. You can now login with your new password.',
+        rateLimited: false
+      };
+    } catch (error) {
+      console.error('Member reset password service error:', error);
+      
+      return {
+        success: false,
+        message: 'An unexpected error occurred. Please try again.',
+        rateLimited: false
+      };
+    }
+  }
+
+  // Verify reset token
+  async verifyResetToken(accessToken) {
+    try {
+      console.log('Verifying member reset token');
+      
+      // Use Supabase to verify the token
+      const { data, error } = await this.supabase.auth.getUser(accessToken);
+
+      if (error) {
+        console.error('Member token verification error:', error);
+        
+        return {
+          success: false,
+          message: 'Invalid or expired reset link. Please request a new one.',
+          rateLimited: false
+        };
+      }
+
+      if (!data.user) {
+        return {
+          success: false,
+          message: 'Invalid or expired reset link. Please request a new one.',
+          rateLimited: false
+        };
+      }
+
+      // Get member info from database
+      const member = await this.prisma.member.findUnique({
+        where: { email: data.user.email }
+      });
+
+      if (!member) {
+        return {
+          success: false,
+          message: 'Member not found. Please contact support.',
+          rateLimited: false
+        };
+      }
+
+      console.log('Member token verification successful for:', data.user.email);
+
+      return {
+        success: true,
+        message: 'Reset link is valid.',
+        user: {
+          email: member.email,
+          fullName: member.full_name
+        },
+        rateLimited: false
+      };
+    } catch (error) {
+      console.error('Member verify reset token service error:', error);
+      
+      return {
+        success: false,
+        message: 'Invalid or expired reset link. Please request a new one.',
+        rateLimited: false
+      };
+    }
+  }
 }
 
 module.exports = MemberAuthService;

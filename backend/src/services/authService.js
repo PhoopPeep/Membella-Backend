@@ -294,7 +294,7 @@ async login(email, password) {
       const { data, error } = await this.supabase.auth.resetPasswordForEmail(
         email.toLowerCase().trim(),
         {
-          redirectTo: `${process.env.FRONTEND_URL}/reset-password`
+          redirectTo: `${process.env.OWNER_FRONTEND_URL}/reset-password`
         }
       );
 

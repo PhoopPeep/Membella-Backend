@@ -56,11 +56,33 @@ const validateChangePassword = [
     .isLength({ min: 8 }).withMessage('New password must be at least 8 characters long')
 ];
 
+// Add validation for forgot password
+const validateForgotPassword = [
+  body('email').isEmail().normalizeEmail().withMessage('Please provide a valid email address'),
+  validate
+];
+
+// Add validation for reset password
+const validateResetPassword = [
+  body('access_token').notEmpty().withMessage('Access token is required'),
+  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters long'),
+  validate
+];
+
+// Add validation for verify reset token
+const validateVerifyResetToken = [
+  body('access_token').notEmpty().withMessage('Access token is required'),
+  validate
+];
+
 // Member authentication routes with proper validation
 router.post('/register', authRateLimiter, validateMemberRegistration, memberAuthController.register);
 router.post('/login', authRateLimiter, validateMemberLogin, memberAuthController.login);
 router.post('/resend-verification', authRateLimiter, validateMemberResendVerification, memberAuthController.resendVerification);
 router.post('/callback', memberAuthController.handleAuthCallback);
 router.put('/change-password', requireMember, authRateLimiter, validateChangePassword, memberAuthController.changePassword);
+router.post('/forgot-password', authRateLimiter, validateForgotPassword, memberAuthController.forgotPassword);
+router.post('/reset-password', authRateLimiter, validateResetPassword, memberAuthController.resetPassword);
+router.post('/verify-reset-token', authRateLimiter, validateVerifyResetToken, memberAuthController.verifyResetToken);
 
 module.exports = router;

@@ -305,6 +305,145 @@ class MemberAuthController {
       });
     }
   });
+
+  // Member Forgot Password
+  forgotPassword = asyncHandler(async (req, res) => {
+    try {
+      console.log('MemberAuthController: Forgot password request received');
+      
+      const { email } = req.body;
+      
+      // Basic validation
+      if (!email) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email is required',
+          rateLimited: false
+        });
+      }
+
+      // Email format validation
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email.trim())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please enter a valid email address',
+          rateLimited: false
+        });
+      }
+      
+      const result = await this.memberAuthService.forgotPassword(email.trim());
+      
+      console.log('Sending member forgot password response:', {
+        success: result.success,
+        message: result.message,
+        rateLimited: result.rateLimited
+      });
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(200).json(result);
+      }
+
+    } catch (error) {
+      console.error('MemberAuthController forgot password error:', error);
+      
+      res.status(200).json({
+        success: false,
+        message: 'An unexpected error occurred. Please try again.',
+        rateLimited: false
+      });
+    }
+  });
+
+  // Member Reset Password
+  resetPassword = asyncHandler(async (req, res) => {
+    try {
+      console.log('MemberAuthController: Reset password request received');
+      
+      const { access_token, password } = req.body;
+      
+      // Basic validation
+      if (!access_token || !password) {
+        return res.status(400).json({
+          success: false,
+          message: 'Access token and password are required',
+          rateLimited: false
+        });
+      }
+
+      if (password.length < 8) {
+        return res.status(400).json({
+          success: false,
+          message: 'Password must be at least 8 characters long',
+          rateLimited: false
+        });
+      }
+      
+      const result = await this.memberAuthService.resetPassword(access_token, password);
+      
+      console.log('Sending member reset password response:', {
+        success: result.success,
+        message: result.message
+      });
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(200).json(result);
+      }
+
+    } catch (error) {
+      console.error('MemberAuthController reset password error:', error);
+      
+      res.status(200).json({
+        success: false,
+        message: 'An unexpected error occurred. Please try again.',
+        rateLimited: false
+      });
+    }
+  });
+
+  // Member Verify Reset Token
+  verifyResetToken = asyncHandler(async (req, res) => {
+    try {
+      console.log('MemberAuthController: Verify reset token request received');
+      
+      const { access_token } = req.body;
+      
+      if (!access_token) {
+        return res.status(400).json({
+          success: false,
+          message: 'Access token is required',
+          rateLimited: false
+        });
+      }
+      
+      const result = await this.memberAuthService.verifyResetToken(access_token);
+      
+      console.log('Sending member verify reset token response:', {
+        success: result.success,
+        message: result.message,
+        hasUser: !!result.user
+      });
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(200).json(result);
+      }
+
+    } catch (error) {
+      console.error('MemberAuthController verify reset token error:', error);
+      
+      res.status(200).json({
+        success: false,
+        message: 'An unexpected error occurred. Please try again.',
+        rateLimited: false
+      });
+    }
+  });
 }
 
 module.exports = MemberAuthController;
