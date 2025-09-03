@@ -238,6 +238,73 @@ class MemberAuthController {
       });
     }
   });
+
+  // Member Change Password
+  changePassword = asyncHandler(async (req, res) => {
+    try {
+      console.log('MemberAuthController: Change password request received');
+      
+      const { currentPassword, newPassword } = req.body;
+      const memberId = req.user.userId; // From JWT token
+      
+      // Basic validation
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({
+          success: false,
+          message: 'Current password and new password are required',
+          validationError: true
+        });
+      }
+
+      if (newPassword.length < 8) {
+        return res.status(400).json({
+          success: false,
+          message: 'New password must be at least 8 characters long',
+          validationError: true
+        });
+      }
+
+      if (currentPassword === newPassword) {
+        return res.status(400).json({
+          success: false,
+          message: 'New password must be different from current password',
+          validationError: true
+        });
+      }
+      
+      const result = await this.memberAuthService.changePassword(
+        memberId, 
+        currentPassword, 
+        newPassword
+      );
+      
+      console.log('Sending member change password response:', {
+        success: result.success,
+        message: result.message
+      });
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        // Return appropriate status codes based on error type
+        let statusCode = 500;
+        if (result.validationError) statusCode = 400;
+        if (result.invalidPassword) statusCode = 401;
+        if (result.rateLimited) statusCode = 429;
+        
+        res.status(statusCode).json(result);
+      }
+
+    } catch (error) {
+      console.error('MemberAuthController change password error:', error);
+      
+      res.status(500).json({
+        success: false,
+        message: 'An unexpected error occurred. Please try again.',
+        systemError: true
+      });
+    }
+  });
 }
 
 module.exports = MemberAuthController;

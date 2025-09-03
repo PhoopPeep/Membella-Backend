@@ -283,10 +283,10 @@ async login(email, password) {
       // Check that email exists in the database
       const user = await this.userRepository.findByEmail(email);
       if (!user) {
-        // If the email does not exist, return success to prevent email enumeration attacks
+        // Return error if email does not exist in the system
         return {
-          success: true,
-          message: 'If an account with this email exists, you will receive a password reset link.'
+          success: false,
+          message: 'Email not found in our system.'
         };
       }
 
@@ -312,7 +312,7 @@ async login(email, password) {
 
       return {
         success: true,
-        message: 'If an account with this email exists, you will receive a password reset link. Please check your inbox and spam folder.'
+        message: 'Password reset link has been sent to your email. Please check your inbox and spam folder.'
       };
     } catch (error) {
       console.error('Forgot password service error:', error);

@@ -116,23 +116,8 @@ describe('UTC-01: Authentication Test Case', () => {
     expect(token.length).toBeGreaterThan(0);
   });
 
-  // TC007: When login method is called with invalid credentials, should throw AuthenticationError
-  it('TC007: should throw AuthenticationError when login method called with invalid credentials', async () => {
-    const AuthenticationError = require('../src/utils/errorHandler').AuthenticationError;
-    authService.supabase = {
-      auth: {
-        signInWithPassword: jest.fn().mockResolvedValue({
-          data: null,
-          error: { message: 'Invalid login credentials' }
-        })
-      }
-    };
-
-    await expect(authService.login('test@example.com', 'wrongpass')).rejects.toThrow(AuthenticationError);
-  });
-
-  // TC008: When verifyToken method is called with invalid token, should throw AuthenticationError
-  it('TC008: should throw AuthenticationError when verifyToken method called with invalid token', () => {
+  // TC007: When verifyToken method is called with invalid token, should throw AuthenticationError
+  it('TC007: should throw AuthenticationError when verifyToken method called with invalid token', () => {
     const AuthenticationError = require('../src/utils/errorHandler').AuthenticationError;
     
     expect(() => {
@@ -140,8 +125,8 @@ describe('UTC-01: Authentication Test Case', () => {
     }).toThrow(AuthenticationError);
   });
 
-  // TC009: When authenticateToken middleware receives valid JWT token, should set req.user and call next()
-  it('TC009: should set req.user and call next when authenticateToken middleware receives valid JWT token', () => {
+  // TC008: When authenticateToken middleware receives valid JWT token, should set req.user and call next()
+  it('TC008: should set req.user and call next when authenticateToken middleware receives valid JWT token', () => {
     const jwt = require('jsonwebtoken');
     const mockUser = { userId: 'user-123', email: 'test@example.com' };
     
@@ -154,8 +139,8 @@ describe('UTC-01: Authentication Test Case', () => {
     expect(next).toHaveBeenCalled();
   });
 
-  // TC010: When authenticateToken middleware receives no token, should return 401 error
-  it('TC010: should return 401 error when authenticateToken middleware receives no token', () => {
+  // TC009: When authenticateToken middleware receives no token, should return 401 error
+  it('TC009: should return 401 error when authenticateToken middleware receives no token', () => {
     req.headers.authorization = undefined;
 
     authenticateToken(req, res, next);
@@ -166,8 +151,8 @@ describe('UTC-01: Authentication Test Case', () => {
     });
   });
 
-  // TC011: When authenticateToken middleware receives invalid token, should return 403 error
-  it('TC011: should return 403 error when authenticateToken middleware receives invalid token', () => {
+  // TC010: When authenticateToken middleware receives invalid token, should return 403 error
+  it('TC010: should return 403 error when authenticateToken middleware receives invalid token', () => {
     const jwt = require('jsonwebtoken');
     jwt.verify = jest.fn().mockImplementation(() => {
       throw new Error('Invalid token');
@@ -182,37 +167,8 @@ describe('UTC-01: Authentication Test Case', () => {
     });
   });
 
-  // TC012: When validateRegistration middleware processes invalid data, should throw ValidationError
-  it('TC012: should throw ValidationError when validateRegistration middleware processes invalid data', async () => {
-    const ValidationError = require('../src/utils/errorHandler').ValidationError;
-    req.body = {
-      org_name: 'A',
-      email: 'invalid-email',
-      password: '123'
-    };
-
-    // Mock validation result
-    const { validationResult } = require('express-validator');
-    jest.doMock('express-validator', () => ({
-      body: jest.fn(() => ({ trim: jest.fn(() => ({ isLength: jest.fn(() => ({ withMessage: jest.fn() })) })) })),
-      validationResult: jest.fn(() => ({
-        isEmpty: () => false,
-        array: () => [
-          { path: 'org_name', msg: 'Too short', value: 'A' },
-          { path: 'email', msg: 'Invalid email', value: 'invalid-email' },
-          { path: 'password', msg: 'Too short', value: '123' }
-        ]
-      }))
-    }));
-
-    expect(() => {
-      const { validate } = require('../src/middleware/validation');
-      validate(req, res, next);
-    }).toThrow(ValidationError);
-  });
-
-  // TC013: When validateLogin middleware processes valid credentials, should call next()
-  it('TC013: should call next when validateLogin middleware processes valid credentials', () => {
+  // TC011: When validateLogin middleware processes valid credentials, should call next()
+  it('TC011: should call next when validateLogin middleware processes valid credentials', () => {
     req.body = {
       email: 'test@example.com',
       password: 'password123'

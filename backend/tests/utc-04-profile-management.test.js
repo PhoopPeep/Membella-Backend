@@ -17,8 +17,8 @@ describe('UTC-04: Profile Management Test Case', () => {
     };
   });
 
-  // TC036: When getProfile is called, should return user profile data
-  it('TC036: should return user profile data when getProfile called', async () => {
+  // TC031: When getProfile is called, should return user profile data
+  it('TC031: should return user profile data when getProfile called', async () => {
     const mockUser = {
       owner_id: 'test-user',
       org_name: 'Test Org',
@@ -39,8 +39,8 @@ describe('UTC-04: Profile Management Test Case', () => {
     expect(res.json).toHaveBeenCalledWith({ user: mockUser });
   });
 
-  // TC037: When updateProfile is called with valid data, should update profile and return success
-  it('TC037: should update profile and return success when updateProfile called with valid data', async () => {
+  // TC032: When updateProfile is called with valid data, should update profile and return success
+  it('TC032: should update profile and return success when updateProfile called with valid data', async () => {
     const mockResult = {
       message: 'Profile updated successfully',
       user: {
@@ -63,8 +63,8 @@ describe('UTC-04: Profile Management Test Case', () => {
     expect(res.json).toHaveBeenCalledWith(mockResult);
   });
 
-  // TC038: When changePassword is called with valid passwords, should change password and return success
-  it('TC038: should change password and return success when changePassword called with valid passwords', async () => {
+  // TC033: When changePassword is called with valid passwords, should change password and return success
+  it('TC033: should change password and return success when changePassword called with valid passwords', async () => {
     const mockResult = {
       message: 'Password changed successfully'
     };
@@ -83,8 +83,8 @@ describe('UTC-04: Profile Management Test Case', () => {
     expect(res.json).toHaveBeenCalledWith(mockResult);
   });
 
-  // TC039: When uploadAvatar is called with valid image file, should upload avatar and return success
-  it('TC039: should upload avatar and return success when uploadAvatar called with valid image file', async () => {
+  // TC034: When uploadAvatar is called with valid image file, should upload avatar and return success
+  it('TC034: should upload avatar and return success when uploadAvatar called with valid image file', async () => {
     const mockResult = {
       message: 'Profile image uploaded successfully',
       user: {
@@ -108,8 +108,8 @@ describe('UTC-04: Profile Management Test Case', () => {
     expect(res.json).toHaveBeenCalledWith(mockResult);
   });
 
-  // TC040: When removeAvatar is called, should remove avatar and return success
-  it('TC040: should remove avatar and return success when removeAvatar called', async () => {
+  // TC035: When removeAvatar is called, should remove avatar and return success
+  it('TC035: should remove avatar and return success when removeAvatar called', async () => {
     const mockResult = {
       message: 'Profile image removed successfully',
       user: {
@@ -129,8 +129,8 @@ describe('UTC-04: Profile Management Test Case', () => {
     expect(res.json).toHaveBeenCalledWith(mockResult);
   });
 
-  // TC041: When userRepository.findById is called with valid ID, should return User object
-  it('TC041: should return User object when userRepository.findById called with valid ID', async () => {
+  // TC036: When userRepository.findById is called with valid ID, should return User object
+  it('TC036: should return User object when userRepository.findById called with valid ID', async () => {
     const mockPrismaUser = {
       owner_id: 'user-123',
       org_name: 'Test Org',
@@ -148,8 +148,8 @@ describe('UTC-04: Profile Management Test Case', () => {
     expect(result).toBeInstanceOf(User);
   });
 
-  // TC042: When userRepository.findByEmail is called with valid email, should return User object
-  it('TC042: should return User object when userRepository.findByEmail called with valid email', async () => {
+  // TC037: When userRepository.findByEmail is called with valid email, should return User object
+  it('TC037: should return User object when userRepository.findByEmail called with valid email', async () => {
     const mockPrismaUser = {
       owner_id: 'user-123',
       email: 'test@example.com'
@@ -166,8 +166,8 @@ describe('UTC-04: Profile Management Test Case', () => {
     expect(result).toBeInstanceOf(User);
   });
 
-  // TC043: When User.validate is called with valid data, should return empty errors array
-  it('TC043: should return empty errors array when User.validate called with valid data', () => {
+  // TC038: When User.validate is called with valid data, should return empty errors array
+  it('TC038: should return empty errors array when User.validate called with valid data', () => {
     const data = {
       org_name: 'Valid Organization',
       email: 'test@example.com'
@@ -178,8 +178,8 @@ describe('UTC-04: Profile Management Test Case', () => {
     expect(errors).toEqual([]);
   });
 
-  // TC044: When User.validate is called with invalid email format, should return validation error
-  it('TC044: should return validation error when User.validate called with invalid email format', () => {
+  // TC039: When User.validate is called with invalid email format, should return validation error
+  it('TC039: should return validation error when User.validate called with invalid email format', () => {
     const data = {
       org_name: 'Valid Org',
       email: 'invalid-email'
@@ -190,8 +190,8 @@ describe('UTC-04: Profile Management Test Case', () => {
     expect(errors).toContain('Invalid email format');
   });
 
-  // TC045: When uploadProfileImage is called with valid file buffer, should upload and return file URL
-  it('TC045: should upload and return file URL when uploadProfileImage called with valid file buffer', async () => {
+  // TC040: When uploadProfileImage is called with valid file buffer, should upload and return file URL
+  it('TC040: should upload and return file URL when uploadProfileImage called with valid file buffer', async () => {
     const mockResult = {
       path: 'user-123/profile_xxx.jpg',
       url: 'https://example.supabase.co/storage/v1/object/public/profiles/user-123/profile_xxx.jpg',
@@ -212,8 +212,8 @@ describe('UTC-04: Profile Management Test Case', () => {
     expect(result.fullPath).toBeDefined();
   });
 
-  // TC046: When deleteProfileImage is called with valid file path, should delete file and return true
-  it('TC046: should delete file and return true when deleteProfileImage called with valid file path', async () => {
+  // TC041: When deleteProfileImage is called with valid file path, should delete file and return true
+  it('TC041: should delete file and return true when deleteProfileImage called with valid file path', async () => {
     supabaseStorage.deleteProfileImage = jest.fn().mockResolvedValue(true);
     
     const filePath = 'user-123/profile_xxx.jpg';
@@ -223,8 +223,8 @@ describe('UTC-04: Profile Management Test Case', () => {
     expect(result).toBe(true);
   });
 
-  // TC047: When extractPathFromUrl is called with public Supabase URL, should extract correct file path
-  it('TC047: should extract correct file path when extractPathFromUrl called with public Supabase URL', () => {
+  // TC042: When extractPathFromUrl is called with public Supabase URL, should extract correct file path
+  it('TC042: should extract correct file path when extractPathFromUrl called with public Supabase URL', () => {
     const url = 'https://example.supabase.co/storage/v1/object/public/profiles/user/file.png';
     
     const result = supabaseStorage.extractPathFromUrl(url);
@@ -232,8 +232,8 @@ describe('UTC-04: Profile Management Test Case', () => {
     expect(result).toBe('user/file.png');
   });
 
-  // TC048: When extractPathFromUrl is called with signed Supabase URL, should extract path without token
-  it('TC048: should extract path without token when extractPathFromUrl called with signed Supabase URL', () => {
+  // TC043: When extractPathFromUrl is called with signed Supabase URL, should extract path without token
+  it('TC043: should extract path without token when extractPathFromUrl called with signed Supabase URL', () => {
     const url = 'https://example.supabase.co/storage/v1/object/sign/profiles/user/file.png?token=abc';
     
     const result = supabaseStorage.extractPathFromUrl(url);
@@ -241,8 +241,8 @@ describe('UTC-04: Profile Management Test Case', () => {
     expect(result).toBe('user/file.png');
   });
 
-  // TC049: When extractPathFromUrl is called with unknown URL format, should return null
-  it('TC049: should return null when extractPathFromUrl called with unknown URL format', () => {
+  // TC044: When extractPathFromUrl is called with unknown URL format, should return null
+  it('TC044: should return null when extractPathFromUrl called with unknown URL format', () => {
     const url = 'https://example.com/unknown';
     
     const result = supabaseStorage.extractPathFromUrl(url);

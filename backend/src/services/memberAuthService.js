@@ -365,6 +365,119 @@ class MemberAuthService {
     }
   }
 
+  // Change Password for Member
+  async changePassword(memberId, currentPassword, newPassword) {
+    try {
+      console.log('MemberAuthService: Changing password for member:', memberId);
+      
+      // Validate inputs
+      if (!currentPassword || !newPassword) {
+        throw new ValidationError('Current password and new password are required');
+      }
+
+      if (newPassword.length < 8) {
+        throw new ValidationError('New password must be at least 8 characters long');
+      }
+
+      // Get member from database
+      const member = await this.prisma.member.findUnique({
+        where: { member_id: memberId }
+      });
+
+      if (!member) {
+        throw new NotFoundError('Member not found');
+      }
+
+      try {
+        // First verify current password with Supabase
+        const { error: signInError } = await this.supabase.auth.signInWithPassword({
+          email: member.email,
+          password: currentPassword
+        });
+
+        if (signInError) {
+          console.log('Current password verification failed:', signInError.message);
+          
+          if (signInError.message.includes('Invalid login credentials')) {
+            return {
+              success: false,
+              message: 'Current password is incorrect',
+              invalidPassword: true
+            };
+          }
+          
+          if (signInError.message.includes('rate limit') || signInError.message.includes('Too many')) {
+            return {
+              success: false,
+              message: 'Too many attempts. Please wait a few minutes before trying again.',
+              rateLimited: true
+            };
+          }
+          
+          return {
+            success: false,
+            message: signInError.message || 'Password verification failed',
+            invalidPassword: true
+          };
+        }
+
+        // Update password in Supabase
+        const { error: updateError } = await this.supabase.auth.admin.updateUserById(
+          memberId,
+          { password: newPassword }
+        );
+
+        if (updateError) {
+          console.error('Password update error:', updateError);
+          return {
+            success: false,
+            message: 'Failed to update password. Please try again.',
+            systemError: true
+          };
+        }
+
+        // Update timestamp in database
+        await this.prisma.member.update({
+          where: { member_id: memberId },
+          data: { update_at: new Date() }
+        });
+
+        console.log('Password changed successfully for member:', memberId);
+
+        return {
+          success: true,
+          message: 'Password changed successfully'
+        };
+        
+      } catch (supabaseError) {
+        console.error('Supabase password change error:', supabaseError);
+        
+        return {
+          success: false,
+          message: 'Failed to change password. Please try again.',
+          systemError: true
+        };
+      }
+      
+    } catch (error) {
+      console.error('MemberAuthService changePassword error:', error);
+      
+      if (error instanceof ValidationError || error instanceof NotFoundError) {
+        return {
+          success: false,
+          message: error.message,
+          validationError: true
+        };
+      }
+
+      return {
+        success: false,
+        message: 'An unexpected error occurred. Please try again later.',
+        systemError: true
+      };
+    }
+  }
+
   generateToken(userId, email) {
     return jwt.sign(
       { userId, email, role: 'member' },

@@ -15,8 +15,8 @@ describe('UTC-03: Plan Management Test Case', () => {
     };
   });
 
-  // TC027: When getPlans is called, should return all plans for authenticated user with features
-  it('TC027: should return all plans for authenticated user with features when getPlans called', async () => {
+  // TC022: When getPlans is called, should return all plans for authenticated user with features
+  it('TC022: should return all plans for authenticated user with features when getPlans called', async () => {
     const mockPlans = [{
       id: 'plan-1',
       name: 'Basic Plan',
@@ -38,8 +38,8 @@ describe('UTC-03: Plan Management Test Case', () => {
     expect(res.json).toHaveBeenCalledWith(mockPlans);
   });
 
-  // TC028: When getPlanById is called with valid ID, should return specific plan
-  it('TC028: should return specific plan when getPlanById called with valid ID', async () => {
+  // TC023: When getPlanById is called with valid ID, should return specific plan
+  it('TC023: should return specific plan when getPlanById called with valid ID', async () => {
     const mockPlan = {
       id: 'plan-123',
       name: 'Basic Plan',
@@ -63,8 +63,8 @@ describe('UTC-03: Plan Management Test Case', () => {
     expect(res.json).toHaveBeenCalledWith(mockPlan);
   });
 
-  // TC029: When createPlan is called with valid data, should create plan and return success
-  it('TC029: should create plan and return success when createPlan called with valid data', async () => {
+  // TC024: When createPlan is called with valid data, should create plan and return success
+  it('TC024: should create plan and return success when createPlan called with valid data', async () => {
     const mockResult = {
       message: 'Plan created successfully',
       plan: {
@@ -95,8 +95,8 @@ describe('UTC-03: Plan Management Test Case', () => {
     expect(res.json).toHaveBeenCalledWith(mockResult);
   });
 
-  // TC030: When updatePlan is called with valid data, should update plan and return success
-  it('TC030: should update plan and return success when updatePlan called with valid data', async () => {
+  // TC025: When updatePlan is called with valid data, should update plan and return success
+  it('TC025: should update plan and return success when updatePlan called with valid data', async () => {
     const mockResult = {
       message: 'Plan updated successfully',
       plan: {
@@ -123,8 +123,8 @@ describe('UTC-03: Plan Management Test Case', () => {
     expect(res.json).toHaveBeenCalledWith(mockResult);
   });
 
-  // TC031: When deletePlan is called with valid ID, should soft delete plan and return success
-  it('TC031: should soft delete plan and return success when deletePlan called with valid ID', async () => {
+  // TC026: When deletePlan is called with valid ID, should soft delete plan and return success
+  it('TC026: should soft delete plan and return success when deletePlan called with valid ID', async () => {
     const mockResult = {
       message: 'Plan deleted successfully'
     };
@@ -143,8 +143,8 @@ describe('UTC-03: Plan Management Test Case', () => {
     expect(res.json).toHaveBeenCalledWith(mockResult);
   });
 
-  // TC032: When getDashboardStats is called, should return statistics including revenue, plans, and features count
-  it('TC032: should return statistics when getDashboardStats called', async () => {
+  // TC027: When getDashboardStats is called, should return statistics including revenue, plans, and features count
+  it('TC027: should return statistics when getDashboardStats called', async () => {
     const mockStats = {
       totalRevenue: 1000,
       totalMembers: 50,
@@ -164,8 +164,8 @@ describe('UTC-03: Plan Management Test Case', () => {
     expect(res.json).toHaveBeenCalledWith(mockStats);
   });
 
-  // TC033: When getRevenueData is called with period parameter, should return revenue data for specified period
-  it('TC033: should return revenue data for specified period when getRevenueData called with period parameter', async () => {
+  // TC028: When getRevenueData is called with period parameter, should return revenue data for specified period
+  it('TC028: should return revenue data for specified period when getRevenueData called with period parameter', async () => {
     const mockRevenueData = [
       { month: 'Jan', revenue: 1000 },
       { month: 'Feb', revenue: 1200 }
@@ -185,8 +185,8 @@ describe('UTC-03: Plan Management Test Case', () => {
     expect(res.json).toHaveBeenCalledWith(mockRevenueData);
   });
 
-  // TC034: When getMembers is called, should return empty array (mock implementation)
-  it('TC034: should return empty array when getMembers called (mock implementation)', async () => {
+  // TC029: When getMembers is called, should return empty array (mock implementation)
+  it('TC029: should return empty array when getMembers called (mock implementation)', async () => {
     dashboardController.getMembers = jest.fn().mockImplementation(async (req, res) => {
       res.json([]);
     });
@@ -198,8 +198,8 @@ describe('UTC-03: Plan Management Test Case', () => {
     expect(res.json).toHaveBeenCalledWith([]);
   });
 
-  // TC035: When getMembersByPlan is called, should return member count grouped by plan
-  it('TC035: should return member count grouped by plan when getMembersByPlan called', async () => {
+  // TC030: When getMembersByPlan is called, should return member count grouped by plan
+  it('TC030: should return member count grouped by plan when getMembersByPlan called', async () => {
     const mockMembersByPlan = [
       { planId: 'plan-1', planName: 'Basic', memberCount: 10 },
       { planId: 'plan-2', planName: 'Premium', memberCount: 5 }

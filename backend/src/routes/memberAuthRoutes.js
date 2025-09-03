@@ -1,6 +1,7 @@
 const express = require('express');
 const MemberAuthController = require('../controllers/memberAuthController');
 const { authRateLimiter } = require('../middleware/rateLimiter');
+const { requireMember } = require('../middleware/roleAuth');
 
 const router = express.Router();
 const memberAuthController = new MemberAuthController();
@@ -48,10 +49,18 @@ const validateMemberResendVerification = [
   validate
 ];
 
+// Add validation for change password
+const validateChangePassword = [
+  body('currentPassword').notEmpty().withMessage('Current password is required'),
+  body('newPassword')
+    .isLength({ min: 8 }).withMessage('New password must be at least 8 characters long')
+];
+
 // Member authentication routes with proper validation
 router.post('/register', authRateLimiter, validateMemberRegistration, memberAuthController.register);
 router.post('/login', authRateLimiter, validateMemberLogin, memberAuthController.login);
 router.post('/resend-verification', authRateLimiter, validateMemberResendVerification, memberAuthController.resendVerification);
 router.post('/callback', memberAuthController.handleAuthCallback);
+router.put('/change-password', requireMember, authRateLimiter, validateChangePassword, memberAuthController.changePassword);
 
 module.exports = router;

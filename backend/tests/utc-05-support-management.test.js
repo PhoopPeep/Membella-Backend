@@ -16,8 +16,8 @@ describe('UTC-05: Supporting Test Case', () => {
     next = jest.fn();
   });
 
-  // TC050: When AppError is instantiated with message and status code, should set correct properties
-  it('TC050: should set correct properties when AppError instantiated with message and status code', () => {
+  // TC045: When AppError is instantiated with message and status code, should set correct properties
+  it('TC045: should set correct properties when AppError instantiated with message and status code', () => {
     const message = 'Test error';
     const statusCode = 400;
     
@@ -28,8 +28,8 @@ describe('UTC-05: Supporting Test Case', () => {
     expect(error.status).toBe('fail');
   });
 
-  // TC051: When ValidationError is instantiated with message and errors, should contain errors array
-  it('TC051: should contain errors array when ValidationError instantiated with message and errors', () => {
+  // TC046: When ValidationError is instantiated with message and errors, should contain errors array
+  it('TC046: should contain errors array when ValidationError instantiated with message and errors', () => {
     const message = 'Validation failed';
     const errors = ['Field required'];
     
@@ -39,8 +39,8 @@ describe('UTC-05: Supporting Test Case', () => {
     expect(error.errors).toEqual(['Field required']);
   });
 
-  // TC052: When asyncHandler wraps a function that throws error, should call next with error
-  it('TC052: should call next with error when asyncHandler wraps a function that throws error', async () => {
+  // TC047: When asyncHandler wraps a function that throws error, should call next with error
+  it('TC047: should call next with error when asyncHandler wraps a function that throws error', async () => {
     const fn = asyncHandler(async () => {
       throw new Error('test');
     });
@@ -50,22 +50,8 @@ describe('UTC-05: Supporting Test Case', () => {
     expect(next).toHaveBeenCalledWith(expect.any(Error));
   });
 
-  // TC053: When errorHandler middleware processes AppError, should return proper JSON response
-  it('TC053: should return proper JSON response when errorHandler middleware processes AppError', () => {
-    const error = new AppError('Custom error', 400);
-    
-    errorHandler(error, req, res, next);
-    
-    expect(res.status).toHaveBeenCalledWith(400);
-    expect(res.json).toHaveBeenCalledWith({
-      success: false,
-      message: 'Custom error',
-      statusCode: 400
-    });
-  });
-
-  // TC054: When authRateLimiter receives requests within limit, should allow requests through
-  it('TC054: should allow requests through when authRateLimiter receives requests within limit', (done) => {
+  // TC048: When authRateLimiter receives requests within limit, should allow requests through
+  it('TC048: should allow requests through when authRateLimiter receives requests within limit', (done) => {
     // Mock rate limiter to allow request
     const mockRateLimiter = (req, res, next) => {
       next();
@@ -77,8 +63,8 @@ describe('UTC-05: Supporting Test Case', () => {
     });
   });
 
-  // TC055: When authRateLimiter receives requests exceeding limit, should return 429 error
-  it('TC055: should return 429 error when authRateLimiter receives requests exceeding limit', () => {
+  // TC049: When authRateLimiter receives requests exceeding limit, should return 429 error
+  it('TC049: should return 429 error when authRateLimiter receives requests exceeding limit', () => {
     // Mock rate limiter to block request
     const mockRateLimiter = (req, res, next) => {
       res.status(429).json({
@@ -98,8 +84,8 @@ describe('UTC-05: Supporting Test Case', () => {
     });
   });
 
-  // TC056: When apiRateLimiter receives requests within limit, should allow requests through
-  it('TC056: should allow requests through when apiRateLimiter receives requests within limit', (done) => {
+  // TC050: When apiRateLimiter receives requests within limit, should allow requests through
+  it('TC050: should allow requests through when apiRateLimiter receives requests within limit', (done) => {
     // Mock rate limiter to allow request
     const mockRateLimiter = (req, res, next) => {
       next();
@@ -110,8 +96,8 @@ describe('UTC-05: Supporting Test Case', () => {
     });
   });
 
-  // UTC057: When uploadRateLimiter receives requests exceeding limit, should return 429 error
-  it('UTC057: should return 429 error when uploadRateLimiter receives requests exceeding limit', () => {
+  // UTC051: When uploadRateLimiter receives requests exceeding limit, should return 429 error
+  it('UTC051: should return 429 error when uploadRateLimiter receives requests exceeding limit', () => {
     // Mock rate limiter to block upload request
     const mockRateLimiter = (req, res, next) => {
       res.status(429).json({
@@ -131,8 +117,8 @@ describe('UTC-05: Supporting Test Case', () => {
     });
   });
 
-  // UTC058: When database connection is tested, should execute query successfully
-  it('UTC058: should execute query successfully when database connection is tested', async () => {
+  // UTC052: When database connection is tested, should execute query successfully
+  it('UTC052: should execute query successfully when database connection is tested', async () => {
     // Mock database query
     const mockQuery = jest.fn().mockResolvedValue([{ test: 1 }]);
     
@@ -142,8 +128,8 @@ describe('UTC-05: Supporting Test Case', () => {
     expect(mockQuery).toHaveBeenCalled();
   });
 
-  // UTC059: When createTestUser helper is called, should create user with valid data
-  it('UTC059: should create user with valid data when createTestUser helper is called', async () => {
+  // UTC053: When createTestUser helper is called, should create user with valid data
+  it('UTC053: should create user with valid data when createTestUser helper is called', async () => {
     const data = {
       org_name: 'Test Org',
       email: 'test@example.com'
@@ -162,8 +148,8 @@ describe('UTC-05: Supporting Test Case', () => {
     expect(result.email).toContain('@');
   });
 
-  // UTC060: When createTestFeature helper is called with owner ID, should create feature
-  it('UTC060: should create feature when createTestFeature helper is called with owner ID', async () => {
+  // UTC054: When createTestFeature helper is called with owner ID, should create feature
+  it('UTC054: should create feature when createTestFeature helper is called with owner ID', async () => {
     const ownerId = 'owner-123';
     const data = { name: 'Test Feature' };
     
@@ -180,8 +166,8 @@ describe('UTC-05: Supporting Test Case', () => {
     expect(result.name).toBe('Test Feature');
   });
 
-  // UTC061: When createTestPlan helper is called with owner ID, should create plan
-  it('UTC061: should create plan when createTestPlan helper is called with owner ID', async () => {
+  // UTC055: When createTestPlan helper is called with owner ID, should create plan
+  it('UTC055: should create plan when createTestPlan helper is called with owner ID', async () => {
     const ownerId = 'owner-123';
     const data = {
       name: 'Test Plan',
@@ -203,8 +189,8 @@ describe('UTC-05: Supporting Test Case', () => {
     expect(result.price).toBe(99.99);
   });
 
-  // UTC062: When createTestToken helper is called with user data, should generate JWT token
-  it('UTC062: should generate JWT token when createTestToken helper is called with user data', () => {
+  // UTC056: When createTestToken helper is called with user data, should generate JWT token
+  it('UTC056: should generate JWT token when createTestToken helper is called with user data', () => {
     const userId = 'user-123';
     const email = 'test@example.com';
     

@@ -57,14 +57,18 @@ class DashboardController {
     });
 
     // Get unique members count
-    const totalMembers = await prisma.subscription.count({
+    const uniqueMembers = await prisma.subscription.findMany({
       where: {
         plan: {
           owner_id: ownerId
         }
       },
+      select: {
+        member_id: true
+      },
       distinct: ['member_id']
     });
+    const totalMembers = uniqueMembers.length;
 
     // Calculate actual revenue from subscriptions
     const subscriptions = await prisma.subscription.findMany({
@@ -260,6 +264,67 @@ class DashboardController {
     }));
 
     res.json(result);
+  });
+
+  // Get members for a specific plan
+  getPlanMembers = asyncHandler(async (req, res) => {
+    const ownerId = req.user.userId;
+    const { planId } = req.params;
+
+    console.log('Getting members for plan:', planId, 'owner:', ownerId);
+
+    // Get members who have subscriptions to this specific plan
+    const members = await prisma.member.findMany({
+      where: {
+        subscriptions: {
+          some: {
+            plan: {
+              plan_id: planId,
+              owner_id: ownerId
+            }
+          }
+        }
+      },
+      include: {
+        subscriptions: {
+          where: {
+            plan: {
+              plan_id: planId,
+              owner_id: ownerId
+            }
+          },
+          include: {
+            plan: {
+              select: {
+                plan_id: true,
+                name: true,
+                price: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: {
+        create_at: 'desc'
+      }
+    });
+
+    // Transform the data to match frontend expectations
+    const transformedMembers = members.map(member => ({
+      id: member.member_id,
+      email: member.email,
+      fullName: member.full_name,
+      phone: member.phone,
+      createdAt: member.create_at,
+      planId: planId,
+      status: member.subscriptions[0]?.status || 'active',
+      subscriptionStart: member.subscriptions[0]?.start_date || member.create_at,
+      subscriptionEnd: member.subscriptions[0]?.end_date || null
+    }));
+
+    console.log(`Found ${transformedMembers.length} members for plan ${planId}`);
+
+    res.json(transformedMembers);
   });
 
   // Helper methods for revenue calculation

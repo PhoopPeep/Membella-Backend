@@ -121,27 +121,18 @@ class ProfileController {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // If email is being updated, check if it's already taken by another user
+    // Email cannot be changed for security reasons
     if (email && email !== existingUser.email) {
-      const emailExists = await prisma.owner.findFirst({
-        where: {
-          email: email.toLowerCase(),
-          owner_id: { not: userId }
-        }
-      });
-
-      if (emailExists) {
-        return res.status(400).json({ message: 'Email is already taken by another user' });
-      }
+      return res.status(400).json({ message: 'Email address cannot be changed for security reasons' });
     }
 
-    // Prepare update data
+    // Prepare update data (exclude email)
     const updateData = {
       update_at: new Date()
     };
 
     if (org_name !== undefined) updateData.org_name = org_name.trim();
-    if (email !== undefined) updateData.email = email.toLowerCase();
+    // Email is intentionally excluded from updates
     if (description !== undefined) updateData.description = description?.trim() || null;
     if (contact_info !== undefined) updateData.contact_info = contact_info;
     
