@@ -142,10 +142,15 @@ class AuthController {
   handleAuthCallback = asyncHandler(async (req, res) => {
     try {
       console.log('AuthController: Auth callback request received');
+      console.log('Request body:', { 
+        hasAccessToken: !!req.body.access_token, 
+        hasRefreshToken: !!req.body.refresh_token
+      });
       
-      const { access_token, refresh_token, type } = req.body;
+      const { access_token, refresh_token } = req.body;
       
       if (!access_token || !refresh_token) {
+        console.log('Missing tokens in request');
         return res.status(400).json({
           success: false,
           message: 'Missing access_token or refresh_token'
@@ -157,7 +162,15 @@ class AuthController {
       
       const { data: { user }, error } = await supabase.auth.getUser(access_token);
       
+      console.log('Supabase user verification:', {
+        hasUser: !!user,
+        userId: user?.id,
+        emailConfirmed: !!user?.email_confirmed_at,
+        error: error?.message
+      });
+      
       if (error || !user) {
+        console.log('Invalid tokens or user not found:', error?.message);
         return res.status(400).json({
           success: false,
           message: 'Invalid tokens or user not found'
@@ -166,6 +179,7 @@ class AuthController {
 
       // Check if user is verified
       if (!user.email_confirmed_at) {
+        console.log('Email not confirmed for user:', user.id);
         return res.status(400).json({
           success: false,
           message: 'Email not verified'
@@ -180,7 +194,14 @@ class AuthController {
         where: { owner_id: user.id }
       });
 
+      console.log('Database user lookup:', {
+        found: !!dbUser,
+        userId: user.id,
+        dbUserId: dbUser?.owner_id
+      });
+
       if (!dbUser) {
+        console.log('User not found in database:', user.id);
         return res.status(404).json({
           success: false,
           message: 'User not found in database'
@@ -189,6 +210,8 @@ class AuthController {
 
       // Generate JWT token
       const token = this.authService.generateToken(dbUser.owner_id, dbUser.email);
+
+      console.log('Auth callback successful for user:', dbUser.owner_id);
 
       res.json({
         success: true,

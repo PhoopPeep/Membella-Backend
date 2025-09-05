@@ -2,6 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const ProfileController = require('../controllers/profileController');
 const { authenticateToken } = require('../middleware/auth');
+const { authenticateTokenOrSupabase } = require('../middleware/supabaseAuth');
 const { apiRateLimiter, uploadRateLimiter } = require('../middleware/rateLimiter');
 
 const router = express.Router();
@@ -38,7 +39,7 @@ router.use((req, res, next) => {
 // All profile routes require authentication
 router.use(authenticateToken);
 
-router.get('/profile', apiRateLimiter, (req, res, next) => {
+router.get('/profile', apiRateLimiter, authenticateTokenOrSupabase, (req, res, next) => {
   console.log('GET /api/auth/profile route handler called');
   profileController.getProfile(req, res, next);
 });

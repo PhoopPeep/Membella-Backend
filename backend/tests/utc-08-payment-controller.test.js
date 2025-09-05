@@ -44,7 +44,7 @@ describe('UTC-08: Payment Controller Test Case', () => {
       // Verify response
       expect(res.json).toHaveBeenCalledWith({
         success: true,
-        publicKey: 'pkey_test_1234567890abcdef'
+        publicKey: process.env.OMISE_PUBLIC_KEY
       });
 
       // Restore environment

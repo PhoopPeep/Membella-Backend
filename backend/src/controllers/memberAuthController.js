@@ -167,10 +167,16 @@ class MemberAuthController {
   handleAuthCallback = asyncHandler(async (req, res) => {
     try {
       console.log('MemberAuthController: Auth callback request received');
+      console.log('Member request body:', { 
+        hasAccessToken: !!req.body.access_token, 
+        hasRefreshToken: !!req.body.refresh_token,
+        type: req.body.type 
+      });
       
-      const { access_token, refresh_token, type } = req.body;
+      const { access_token, refresh_token } = req.body;
       
       if (!access_token || !refresh_token) {
+        console.log('Missing tokens in member request');
         return res.status(400).json({
           success: false,
           message: 'Missing access_token or refresh_token'
@@ -182,7 +188,15 @@ class MemberAuthController {
       
       const { data: { user }, error } = await supabase.auth.getUser(access_token);
       
+      console.log('Member Supabase user verification:', {
+        hasUser: !!user,
+        userId: user?.id,
+        emailConfirmed: !!user?.email_confirmed_at,
+        error: error?.message
+      });
+      
       if (error || !user) {
+        console.log('Invalid tokens or user not found:', error?.message);
         return res.status(400).json({
           success: false,
           message: 'Invalid tokens or user not found'
@@ -191,6 +205,7 @@ class MemberAuthController {
 
       // Check if user is verified
       if (!user.email_confirmed_at) {
+        console.log('Email not confirmed for member:', user.id);
         return res.status(400).json({
           success: false,
           message: 'Email not verified'
@@ -205,7 +220,14 @@ class MemberAuthController {
         where: { member_id: user.id }
       });
 
+      console.log('Member database lookup:', {
+        found: !!dbMember,
+        userId: user.id,
+        dbMemberId: dbMember?.member_id
+      });
+
       if (!dbMember) {
+        console.log('Member not found in database:', user.id);
         return res.status(404).json({
           success: false,
           message: 'Member not found in database'
@@ -214,6 +236,8 @@ class MemberAuthController {
 
       // Generate JWT token for member
       const token = this.memberAuthService.generateToken(dbMember.member_id, dbMember.email);
+
+      console.log('Member auth callback successful for user:', dbMember.member_id);
 
       res.json({
         success: true,

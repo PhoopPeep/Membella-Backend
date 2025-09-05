@@ -228,6 +228,7 @@ class App {
   
     // Import member auth routes
     const memberAuthRoutes = require('./routes/memberAuthRoutes');
+    const webhookRoutes = require('./routes/webhookRoutes');
   
     // API routes
     this.app.use('/api/auth', authRoutes);
@@ -238,6 +239,9 @@ class App {
     this.app.use('/api/auth', profileRoutes);
     this.app.use('/api/owner', ownerRouts);
     this.app.use('/api/member', memberRoutes);
+    
+    // Webhook routes
+    this.app.use('/api/webhooks', webhookRoutes);
     
     // Payment and Subscription routes
     this.app.use('/api/payments', paymentRoutes);

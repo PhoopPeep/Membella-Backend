@@ -85,7 +85,20 @@ const storageService = {
 
 class ProfileController {
   getProfile = asyncHandler(async (req, res) => {
-    const userId = req.user.userId;
+    let userId;
+    
+    // Check if we have a JWT token (normal auth) or Supabase token (direct auth)
+    if (req.user && req.user.userId) {
+      // Normal JWT authentication
+      userId = req.user.userId;
+    } else if (req.user && req.user.id) {
+      // Supabase token authentication
+      userId = req.user.id;
+    } else {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+    
+    console.log('Profile request for user:', userId);
     
     const user = await prisma.owner.findUnique({
       where: { owner_id: userId },
@@ -102,14 +115,27 @@ class ProfileController {
     });
 
     if (!user) {
+      console.log('User not found in database:', userId);
       return res.status(404).json({ message: 'User not found' });
     }
 
+    console.log('Profile found for user:', userId);
     res.json({ user });
   });
 
   updateProfile = asyncHandler(async (req, res) => {
-    const userId = req.user.userId;
+    let userId;
+    
+    // Check if we have a JWT token (normal auth) or Supabase token (direct auth)
+    if (req.user && req.user.userId) {
+      // Normal JWT authentication
+      userId = req.user.userId;
+    } else if (req.user && req.user.id) {
+      // Supabase token authentication
+      userId = req.user.id;
+    } else {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
     const { org_name, email, description, contact_info } = req.body;
     
     // Check if user exists
