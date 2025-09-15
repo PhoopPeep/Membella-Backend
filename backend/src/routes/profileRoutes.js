@@ -40,36 +40,36 @@ router.use((req, res, next) => {
 router.use(authenticateToken);
 
 router.get('/profile', apiRateLimiter, authenticateTokenOrSupabase, (req, res, next) => {
-  console.log('GET /api/auth/profile route handler called');
+  console.log('GET /api/profile/profile route handler called');
   profileController.getProfile(req, res, next);
 });
 
 router.put('/profile', apiRateLimiter, (req, res, next) => {
-  console.log('PUT /api/auth/profile route handler called');
+  console.log('PUT /api/profile/profile route handler called');
   profileController.updateProfile(req, res, next);
 });
 
 router.put('/change-password', apiRateLimiter, (req, res, next) => {
-  console.log('PUT /api/auth/change-password route handler called');
+  console.log('PUT /api/profile/change-password route handler called');
   profileController.changePassword(req, res, next);
 });
 
 router.post('/upload-avatar', uploadRateLimiter, upload.single('logo'), (req, res, next) => {
-  console.log('POST /api/auth/upload-avatar route handler called');
+  console.log('POST /api/profile/upload-avatar route handler called');
   profileController.uploadAvatar(req, res, next);
 });
 
 router.delete('/avatar', apiRateLimiter, (req, res, next) => {
-  console.log('DELETE /api/auth/avatar route handler called');
+  console.log('DELETE /api/profile/avatar route handler called');
   profileController.removeAvatar(req, res, next);
 });
 
 console.log('Profile Routes Registered:', {
-  'GET /profile': 'getProfile → /api/auth/profile',
-  'PUT /profile': 'updateProfile → /api/auth/profile',
-  'PUT /change-password': 'changePassword → /api/auth/change-password',
-  'POST /upload-avatar': 'uploadAvatar → /api/auth/upload-avatar',
-  'DELETE /avatar': 'removeAvatar → /api/auth/avatar'
+  'GET /profile': 'getProfile → /api/profile/profile',
+  'PUT /profile': 'updateProfile → /api/profile/profile',
+  'PUT /change-password': 'changePassword → /api/profile/change-password',
+  'POST /upload-avatar': 'uploadAvatar → /api/profile/upload-avatar',
+  'DELETE /avatar': 'removeAvatar → /api/profile/avatar'
 });
 
 module.exports = router;

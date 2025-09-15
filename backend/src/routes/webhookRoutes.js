@@ -12,13 +12,10 @@ router.use(express.json({ limit: '10mb' }));
 // Health check endpoint
 router.get('/health', webhookController.webhookHealthCheck);
 
-// Database webhook endpoint
+// Database webhook endpoints (user creation only)
 router.post('/user-created', webhookController.handleUserCreated);
 
-// Auth webhook endpoint
-router.post('/auth/user-created', webhookController.handleAuthEvent);
-
-// Generic auth events webhook
-router.post('/auth/events', webhookController.handleAuthEvent);
+// Legacy endpoints (for backward compatibility)
+router.post('/email-verification', webhookController.handleEmailVerification);
 
 module.exports = router;

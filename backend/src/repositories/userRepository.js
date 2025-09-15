@@ -46,6 +46,17 @@ class UserRepository {
     return User.fromPrisma(user);
   }
 
+  async updatePassword(id, newPassword) {
+    const user = await this.prisma.owner.update({
+      where: { owner_id: id },
+      data: {
+        password: newPassword,
+        update_at: new Date()
+      }
+    });
+    return User.fromPrisma(user);
+  }
+
   async delete(id) {
     await this.prisma.owner.delete({
       where: { owner_id: id }

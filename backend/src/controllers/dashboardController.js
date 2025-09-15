@@ -224,7 +224,6 @@ class DashboardController {
       id: member.member_id,
       email: member.email,
       fullName: member.full_name,
-      phone: member.phone,
       createdAt: member.create_at,
       subscriptions: member.subscriptions.map(sub => ({
         id: sub.subscription_id,
@@ -302,6 +301,24 @@ class DashboardController {
               }
             }
           }
+        },
+        payments: {
+          where: {
+            plan: {
+              owner_id: ownerId
+            }
+          },
+          include: {
+            plan: {
+              select: {
+                plan_id: true,
+                name: true
+              }
+            }
+          },
+          orderBy: {
+            create_at: 'desc'
+          }
         }
       },
       orderBy: {
@@ -310,17 +327,31 @@ class DashboardController {
     });
 
     // Transform the data to match frontend expectations
-    const transformedMembers = members.map(member => ({
-      id: member.member_id,
-      email: member.email,
-      fullName: member.full_name,
-      phone: member.phone,
-      createdAt: member.create_at,
-      planId: planId,
-      status: member.subscriptions[0]?.status || 'active',
-      subscriptionStart: member.subscriptions[0]?.start_date || member.create_at,
-      subscriptionEnd: member.subscriptions[0]?.end_date || null
-    }));
+    const transformedMembers = members.map(member => {
+      const activeSubscription = member.subscriptions.find(sub => sub.status === 'active');
+      const allPayments = member.payments.map(payment => ({
+        id: payment.payment_id,
+        amount: parseFloat(payment.amount.toString()),
+        status: payment.status,
+        planName: payment.plan.name,
+        createdAt: payment.create_at
+      }));
+
+      return {
+        id: member.member_id,
+        email: member.email,
+        fullName: member.full_name,
+        createdAt: member.create_at,
+        planId: planId,
+        status: member.subscriptions[0]?.status || 'active',
+        subscriptionStart: member.subscriptions[0]?.start_date || member.create_at,
+        subscriptionEnd: member.subscriptions[0]?.end_date || null,
+        paymentHistory: allPayments,
+        totalSpent: allPayments
+          .filter(p => p.status === 'successful')
+          .reduce((sum, p) => sum + p.amount, 0)
+      };
+    });
 
     console.log(`Found ${transformedMembers.length} members for plan ${planId}`);
 

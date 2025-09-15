@@ -184,9 +184,11 @@ class MemberAuthController {
       }
 
       // Verify the tokens with Supabase and get user data
-      const { supabase } = require('../config/supabase');
+      const { supabase, supabaseAnon } = require('../config/supabase');
       
-      const { data: { user }, error } = await supabase.auth.getUser(access_token);
+      // Use anon client for token verification
+      const clientToUse = supabaseAnon || supabase;
+      const { data: { user }, error } = await clientToUse.auth.getUser(access_token);
       
       console.log('Member Supabase user verification:', {
         hasUser: !!user,
@@ -247,7 +249,6 @@ class MemberAuthController {
           id: dbMember.member_id,
           email: dbMember.email,
           fullName: dbMember.full_name,
-          phone: dbMember.phone,
           role: 'member',
           createdAt: dbMember.create_at,
           updatedAt: dbMember.update_at

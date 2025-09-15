@@ -244,6 +244,33 @@ class PlansController {
       return res.status(404).json({ message: 'Plan not found' });
     }
 
+    // Check if plan has active members
+    const activeSubscriptions = await prisma.subscription.findMany({
+      where: {
+        plan_id: id,
+        status: 'active'
+      },
+      include: {
+        member: {
+          select: {
+            full_name: true,
+            email: true
+          }
+        }
+      }
+    });
+
+    if (activeSubscriptions.length > 0) {
+      return res.status(400).json({ 
+        message: 'Cannot delete plan with active members',
+        details: `This plan has ${activeSubscriptions.length} active member(s). Please cancel all subscriptions before deleting the plan.`,
+        activeMembers: activeSubscriptions.map(sub => ({
+          name: sub.member.full_name,
+          email: sub.member.email
+        }))
+      });
+    }
+
     // Soft delete the plan
     await prisma.plan.update({
       where: {

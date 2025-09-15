@@ -229,6 +229,8 @@ class App {
     // Import member auth routes
     const memberAuthRoutes = require('./routes/memberAuthRoutes');
     const webhookRoutes = require('./routes/webhookRoutes');
+    
+    // Verification routes removed - no longer needed
   
     // API routes
     this.app.use('/api/auth', authRoutes);
@@ -236,12 +238,15 @@ class App {
     this.app.use('/api/features', featureRoutes);
     this.app.use('/api/plans', planRoutes);
     this.app.use('/api/dashboard', dashboardRoutes);
-    this.app.use('/api/auth', profileRoutes);
+    this.app.use('/api/profile', profileRoutes);
     this.app.use('/api/owner', ownerRouts);
     this.app.use('/api/member', memberRoutes);
     
     // Webhook routes
     this.app.use('/api/webhooks', webhookRoutes);
+    
+    
+    // Verification routes removed - no longer needed
     
     // Payment and Subscription routes
     this.app.use('/api/payments', paymentRoutes);
@@ -283,17 +288,21 @@ class App {
     try {
       await connectDatabase();
       
+      // Verification services removed - no longer needed
+      
       this.app.listen(port, () => {
         logger.info(`Server running on http://localhost:${port}`);
         logger.info(`Health check: http://localhost:${port}/api/health`);
         logger.info(`Database health check: http://localhost:${port}/api/health/db`);
-        logger.info(`Payment webhook: http://localhost:${port}/api/payments/webhook`);
+        // Verification API endpoints removed - no longer needed
       });
     } catch (error) {
       logger.error('Failed to start server:', error);
       process.exit(1);
     }
   }
+
+  // Verification services removed - no longer needed
 
   getApp() {
     return this.app;

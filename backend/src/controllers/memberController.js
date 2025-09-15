@@ -264,103 +264,6 @@ class MemberController {
     }
   });
 
-  // Search owners
-  searchOwners = asyncHandler(async (req, res) => {
-    try {
-      const { q } = req.query; // query parameter for search
-      
-      console.log('MemberController: Searching owners with query:', q);
-
-      let whereClause = {};
-      
-      if (q && typeof q === 'string' && q.trim()) {
-        whereClause = {
-          OR: [
-            {
-              org_name: {
-                contains: q.trim(),
-                mode: 'insensitive'
-              }
-            },
-            {
-              description: {
-                contains: q.trim(),
-                mode: 'insensitive'
-              }
-            }
-          ]
-        };
-      }
-
-      const owners = await prisma.owner.findMany({
-        where: whereClause,
-        select: {
-          owner_id: true,
-          org_name: true,
-          email: true,
-          description: true,
-          contact_info: true,
-          logo: true,
-          create_at: true,
-          plans: {
-            where: {
-              delete_at: null
-            },
-            select: {
-              plan_id: true,
-              price: true
-            }
-          },
-          features: {
-            where: {
-              delete_at: null
-            },
-            select: {
-              feature_id: true
-            }
-          }
-        },
-        take: 20, // 20 per page
-        orderBy: {
-          create_at: 'desc'
-        }
-      });
-
-      // convert data like getOwners
-      const transformedOwners = owners.map(owner => {
-        const planPrices = owner.plans.map(plan => parseFloat(plan.price.toString()));
-        const minPrice = planPrices.length > 0 ? Math.min(...planPrices) : 0;
-        const maxPrice = planPrices.length > 0 ? Math.max(...planPrices) : 0;
-        
-        return {
-          id: owner.owner_id,
-          orgName: owner.org_name,
-          email: owner.email,
-          description: owner.description,
-          contactInfo: owner.contact_info,
-          logo: owner.logo,
-          createdAt: owner.create_at,
-          planCount: owner.plans.length,
-          featureCount: owner.features.length,
-          minPrice: minPrice,
-          maxPrice: maxPrice
-        };
-      });
-
-      console.log(`Search found ${transformedOwners.length} owners`);
-
-      res.status(200).json(transformedOwners);
-    } catch (error) {
-      console.error('Error in searchOwners:', error);
-      
-      res.status(500).json({
-        success: false,
-        message: 'Failed to search organizations',
-        error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-      });
-    }
-  });
-
   // Get members with their subscriptions and payment history for owner
   getMembers = asyncHandler(async (req, res) => {
     try {
@@ -447,7 +350,6 @@ class MemberController {
           id: member.member_id,
           fullName: member.full_name,
           email: member.email,
-          phone: member.phone,
           createdAt: member.create_at,
           currentPlan: activeSubscription ? {
             id: activeSubscription.plan.plan_id,

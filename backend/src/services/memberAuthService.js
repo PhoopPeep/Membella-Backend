@@ -1,5 +1,5 @@
 const { getPrismaClient } = require('../config/database');
-const { supabase } = require('../config/supabase');
+const { supabase, supabaseAnon } = require('../config/supabase');
 const jwt = require('jsonwebtoken');
 const { ValidationError, AuthenticationError, ConflictError, AppError, NotFoundError } = require('../utils/errorHandler');
 
@@ -54,7 +54,7 @@ class MemberAuthService {
         email: userData.email.toLowerCase().trim(),
         password: userData.password,
         options: {
-          emailRedirectTo: `${process.env.MEMBER_FRONTEND_URL}/auth/callback`,
+          emailRedirectTo: `${process.env.MEMBER_FRONTEND_URL || 'http://localhost:5174'}/auth/callback`,
           data: {
             full_name: userData.fullName,
             phone: userData.phone,
@@ -109,7 +109,6 @@ class MemberAuthService {
               member_id: authData.user.id,
               email: userData.email.toLowerCase().trim(),
               full_name: userData.fullName.trim(),
-              phone: userData.phone?.trim() || null,
               password: '' // Password is managed by Supabase
             }
           });
@@ -123,7 +122,6 @@ class MemberAuthService {
               member_id: newMember.member_id,
               email: newMember.email,
               full_name: newMember.full_name,
-              phone: newMember.phone,
               create_at: newMember.create_at,
               update_at: newMember.update_at
             },
@@ -289,7 +287,6 @@ class MemberAuthService {
           id: member.member_id,
           email: member.email,
           fullName: member.full_name,
-          phone: member.phone,
           role: 'member',
           createdAt: member.create_at,
           updatedAt: member.update_at
@@ -319,7 +316,7 @@ class MemberAuthService {
         type: 'signup',
         email: email.toLowerCase().trim(),
         options: {
-          emailRedirectTo: `${process.env.MEMBER_FRONTEND_URL}/auth/callback`
+          emailRedirectTo: `${process.env.MEMBER_FRONTEND_URL || 'http://localhost:5174'}/auth/callback`
         }
       });
 
@@ -517,7 +514,8 @@ class MemberAuthService {
       const { data, error } = await this.supabase.auth.resetPasswordForEmail(
         email.toLowerCase().trim(),
         {
-          redirectTo: `${process.env.MEMBER_FRONTEND_URL}/reset-password`
+          redirectTo: `${process.env.MEMBER_FRONTEND_URL || 'http://localhost:5174'}/reset-password`
+
         }
       );
 
@@ -561,11 +559,27 @@ class MemberAuthService {
   async resetPassword(accessToken, newPassword) {
     try {
       console.log('Resetting member password with access token');
+      console.log('Access token length:', accessToken ? accessToken.length : 'null');
+      console.log('Using anon client:', !!supabaseAnon);
       
-      // Use Supabase to reset password
-      const { data, error } = await this.supabase.auth.updateUser({
-        password: newPassword
-      });
+      // Use anon client to verify the access token
+      const clientToUse = supabaseAnon || this.supabase;
+      const { data: { user }, error: userError } = await clientToUse.auth.getUser(accessToken);
+      
+      if (userError || !user) {
+        console.error('Member token verification error:', userError);
+        return {
+          success: false,
+          message: 'Invalid or expired reset link. Please request a new one.',
+          rateLimited: false
+        };
+      }
+
+      // Use Supabase admin API to update password
+      const { error } = await this.supabase.auth.admin.updateUserById(
+        user.id,
+        { password: newPassword }
+      );
 
       if (error) {
         console.error('Member password reset error:', error);
@@ -585,7 +599,7 @@ class MemberAuthService {
         };
       }
 
-      console.log('Member password reset successful:', data);
+      console.log('Member password reset successful for user:', user.id);
 
       return {
         success: true,
@@ -607,9 +621,12 @@ class MemberAuthService {
   async verifyResetToken(accessToken) {
     try {
       console.log('Verifying member reset token');
+      console.log('Access token length:', accessToken ? accessToken.length : 'null');
+      console.log('Using anon client:', !!supabaseAnon);
       
-      // Use Supabase to verify the token
-      const { data, error } = await this.supabase.auth.getUser(accessToken);
+      // Use anon client to verify the token
+      const clientToUse = supabaseAnon || this.supabase;
+      const { data, error } = await clientToUse.auth.getUser(accessToken);
 
       if (error) {
         console.error('Member token verification error:', error);

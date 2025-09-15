@@ -29,7 +29,6 @@ model Member {
   member_id   String    @id @default(uuid())
   email       String    @unique
   full_name   String
-  phone       String?
   password    String    @default("")
   create_at   DateTime  @default(now())
   update_at   DateTime  @default(now())
