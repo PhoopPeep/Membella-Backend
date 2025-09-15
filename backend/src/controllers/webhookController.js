@@ -1,5 +1,6 @@
 const { asyncHandler } = require('../utils/errorHandler');
 const { getPrismaClient } = require('../config/database');
+const crypto = require('crypto');
 
 class WebhookController {
   constructor() {
@@ -12,7 +13,7 @@ class WebhookController {
       console.log('Webhook: User created event received');
       console.log('Webhook payload:', JSON.stringify(req.body, null, 2));
 
-      const { type, table, record, old_record, schema, event } = req.body;
+      const { type, table, record } = req.body;
 
       // Verify webhook signature (optional but recommended)
       const webhookSecret = process.env.SUPABASE_WEBHOOK_SECRET;
@@ -99,7 +100,7 @@ class WebhookController {
       console.log('Webhook: Email verification event received');
       console.log('Webhook payload:', JSON.stringify(req.body, null, 2));
 
-      const { type, table, record, old_record, schema, event } = req.body;
+      const { type, table, record } = req.body;
 
       // Verify webhook signature (optional but recommended)
       const webhookSecret = process.env.SUPABASE_WEBHOOK_SECRET;
@@ -163,7 +164,7 @@ class WebhookController {
       console.log('Webhook: User updated event received');
       console.log('Webhook payload:', JSON.stringify(req.body, null, 2));
 
-      const { type, table, record, old_record, schema, event } = req.body;
+      const { type, table, record } = req.body;
 
       // Verify webhook signature (optional but recommended)
       const webhookSecret = process.env.SUPABASE_WEBHOOK_SECRET;
@@ -236,6 +237,181 @@ class WebhookController {
       res.status(500).json({ error: 'User updated webhook processing failed' });
     }
   });
+
+  // Handle Omise payment webhook
+  handleOmisePayment = asyncHandler(async (req, res) => {
+    try {
+      console.log('Webhook: Omise payment event received');
+      console.log('Webhook payload:', JSON.stringify(req.body, null, 2));
+
+      const { type, data } = req.body;
+
+      // Verify webhook signature
+      const webhookSecret = process.env.OMISE_WEBHOOK_SECRET;
+      if (webhookSecret) {
+        const signature = req.headers['x-omise-signature'];
+        if (!signature) {
+          console.log('Missing Omise webhook signature');
+          return res.status(401).json({ error: 'Missing webhook signature' });
+        }
+
+        // Verify signature
+        const expectedSignature = crypto
+          .createHmac('sha256', webhookSecret)
+          .update(JSON.stringify(req.body))
+          .digest('hex');
+
+        if (signature !== expectedSignature) {
+          console.log('Invalid webhook signature');
+          return res.status(401).json({ error: 'Invalid webhook signature' });
+        }
+      }
+
+      // Handle different payment events
+      if (type === 'charge.complete' || type === 'charge.successful') {
+        await this.handleSuccessfulPayment(data);
+      } else if (type === 'charge.failed') {
+        await this.handleFailedPayment(data);
+      } else if (type === 'charge.expired') {
+        await this.handleExpiredPayment(data);
+      } else {
+        console.log('Unhandled webhook event type:', type);
+      }
+
+      res.status(200).json({ success: true, message: 'Omise webhook processed successfully' });
+
+    } catch (error) {
+      console.error('Omise webhook processing error:', error);
+      res.status(500).json({ error: 'Omise webhook processing failed' });
+    }
+  });
+
+  // Handle successful payment
+  async handleSuccessfulPayment(chargeData) {
+    try {
+      console.log('Processing successful payment:', chargeData.id);
+
+      // Find the payment record
+      const payment = await this.prisma.payment.findFirst({
+        where: {
+          omise_charge_id: chargeData.id
+        },
+        include: {
+          plan: true,
+          member: true
+        }
+      });
+
+      if (!payment) {
+        console.log('Payment record not found for charge:', chargeData.id);
+        return;
+      }
+
+      // Update payment status
+      await this.prisma.payment.update({
+        where: { payment_id: payment.payment_id },
+        data: {
+          status: 'successful',
+          omise_charge_id: chargeData.id,
+          omise_transaction_id: chargeData.transaction,
+          update_at: new Date()
+        }
+      });
+
+      // Create subscription
+      const subscription = await this.prisma.subscription.create({
+        data: {
+          member_id: payment.member_id,
+          plan_id: payment.plan_id,
+          payment_id: payment.payment_id,
+          status: 'active',
+          start_date: new Date(),
+          end_date: new Date(Date.now() + payment.plan.duration * 24 * 60 * 60 * 1000), // Add duration in days
+          create_at: new Date(),
+          update_at: new Date()
+        }
+      });
+
+      console.log('Subscription created successfully:', subscription.subscription_id);
+
+      // Send confirmation email (optional)
+      // await this.sendPaymentConfirmationEmail(payment, subscription);
+
+    } catch (error) {
+      console.error('Error handling successful payment:', error);
+      throw error;
+    }
+  }
+
+  // Handle failed payment
+  async handleFailedPayment(chargeData) {
+    try {
+      console.log('Processing failed payment:', chargeData.id);
+
+      // Find the payment record
+      const payment = await this.prisma.payment.findFirst({
+        where: {
+          omise_charge_id: chargeData.id
+        }
+      });
+
+      if (!payment) {
+        console.log('Payment record not found for charge:', chargeData.id);
+        return;
+      }
+
+      // Update payment status
+      await this.prisma.payment.update({
+        where: { payment_id: payment.payment_id },
+        data: {
+          status: 'failed',
+          omise_charge_id: chargeData.id,
+          update_at: new Date()
+        }
+      });
+
+      console.log('Payment marked as failed:', payment.payment_id);
+
+    } catch (error) {
+      console.error('Error handling failed payment:', error);
+      throw error;
+    }
+  }
+
+  // Handle expired payment
+  async handleExpiredPayment(chargeData) {
+    try {
+      console.log('Processing expired payment:', chargeData.id);
+
+      // Find the payment record
+      const payment = await this.prisma.payment.findFirst({
+        where: {
+          omise_charge_id: chargeData.id
+        }
+      });
+
+      if (!payment) {
+        console.log('Payment record not found for charge:', chargeData.id);
+        return;
+      }
+
+      // Update payment status
+      await this.prisma.payment.update({
+        where: { payment_id: payment.payment_id },
+        data: {
+          status: 'expired',
+          omise_charge_id: chargeData.id,
+          update_at: new Date()
+        }
+      });
+
+      console.log('Payment marked as expired:', payment.payment_id);
+
+    } catch (error) {
+      console.error('Error handling expired payment:', error);
+      throw error;
+    }
+  }
 
   // Health check for webhooks
   webhookHealthCheck = asyncHandler(async (req, res) => {

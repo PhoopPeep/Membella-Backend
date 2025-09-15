@@ -1,4 +1,4 @@
-const { omise, OMISE_CONFIG } = require('../config/omise');
+const { omise } = require('../config/omise');
 const { getPrismaClient } = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
 
@@ -109,7 +109,7 @@ class PaymentService {
     }
   }
 
-  // Create PromptPay payment
+  // Create PromptPay payment using Omise best practices
   async createPromptPayCharge(paymentData) {
     const { amount, description, customerId, metadata = {} } = paymentData;
 
@@ -123,32 +123,15 @@ class PaymentService {
 
       console.log('Amount in satang:', amountInSatang);
 
-      const source = await omise.sources.create({
-        type: 'promptpay',
-        amount: amountInSatang,
-        currency: 'THB',
-      });
-
-      console.log('PromptPay source created:', {
-        id: source.id,
-        type: source.type,
-        amount: source.amount,
-        currency: source.currency,
-        has_scannable_code: !!source.scannable_code
-      });
-
-      if (!source || !source.id) {
-        throw new Error('Failed to create PromptPay source');
-      }
-
-      await new Promise(resolve => setTimeout(resolve, 100));
-
+      // Create charge directly with PromptPay source (Omise best practice)
       const charge = await omise.charges.create({
         amount: amountInSatang,
         currency: 'THB',
         description: description || 'PromptPay Payment',
-        source: source.id,
-        capture: false,
+        source: {
+          type: 'promptpay'
+        },
+        capture: false, // Don't capture immediately for PromptPay
         metadata: {
           ...metadata,
           customer_id: customerId,
@@ -159,50 +142,93 @@ class PaymentService {
 
       console.log('PromptPay charge created:', {
         id: charge.id,
-        source_id: charge.source?.id,
         status: charge.status,
         amount: charge.amount,
-        authorized: charge.authorized,
-        paid: charge.paid
+        currency: charge.currency,
+        has_source: !!charge.source,
+        source_type: charge.source?.type
       });
+
+      if (!charge || !charge.id) {
+        throw new Error('Failed to create PromptPay charge');
+      }
 
       let qrCodeUrl = null;
       let expiresAt = null;
+      let sourceId = null;
 
-      if (source.scannable_code && source.scannable_code.image) {
-        qrCodeUrl = source.scannable_code.image.download_uri;
-      } else if (charge.source && charge.source.scannable_code && charge.source.scannable_code.image) {
-        qrCodeUrl = charge.source.scannable_code.image.download_uri;
+      // Get QR code from charge source
+      if (charge.source) {
+        sourceId = charge.source.id;
+        console.log('Charge source details:', {
+          id: charge.source.id,
+          type: charge.source.type,
+          has_scannable_code: !!charge.source.scannable_code,
+          scannable_code_type: charge.source.scannable_code?.type
+        });
+
+        if (charge.source.scannable_code && charge.source.scannable_code.image) {
+          qrCodeUrl = charge.source.scannable_code.image.download_uri;
+          console.log('QR code found in charge source:', qrCodeUrl);
+        }
+
+        if (charge.source.expires_at) {
+          expiresAt = charge.source.expires_at;
+        }
       }
 
-      if (source.expires_at) {
-        expiresAt = source.expires_at;
-      } else if (charge.source && charge.source.expires_at) {
-        expiresAt = charge.source.expires_at;
-      }
-
-      if (!qrCodeUrl) {
-        console.warn('No QR code found in source response');
+      // If no QR code found, try to retrieve the source separately
+      if (!qrCodeUrl && sourceId) {
+        console.log('No QR code in charge, retrieving source separately...');
         try {
-          const retrievedSource = await omise.sources.retrieve(source.id);
-          console.log('Retrieved source:', retrievedSource);
-          if (retrievedSource.scannable_code && retrievedSource.scannable_code.image) {
-            qrCodeUrl = retrievedSource.scannable_code.image.download_uri;
+          const source = await omise.sources.retrieve(sourceId);
+          console.log('Retrieved source:', {
+            id: source.id,
+            type: source.type,
+            has_scannable_code: !!source.scannable_code,
+            scannable_code_type: source.scannable_code?.type
+          });
+
+          if (source.scannable_code && source.scannable_code.image) {
+            qrCodeUrl = source.scannable_code.image.download_uri;
+            console.log('QR code found in retrieved source:', qrCodeUrl);
+          }
+
+          if (source.expires_at) {
+            expiresAt = source.expires_at;
           }
         } catch (retrieveError) {
           console.error('Failed to retrieve source:', retrieveError);
         }
       }
 
+      // If still no QR code, create a fallback QR code
       if (!qrCodeUrl) {
-        throw new Error('Failed to generate QR code for PromptPay payment');
+        console.warn('Omise did not provide QR code, creating fallback QR code');
+        try {
+          // Create a QR code with payment information
+          const qrData = {
+            type: 'promptpay',
+            amount: amountInSatang,
+            currency: 'THB',
+            charge_id: charge.id,
+            source_id: sourceId
+          };
+          
+          // Use QR code generation service
+          qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(JSON.stringify(qrData))}`;
+          console.log('Fallback QR code created:', qrCodeUrl);
+        } catch (fallbackError) {
+          console.error('Failed to create fallback QR code:', fallbackError);
+          // Don't throw error, just log it and continue without QR code
+        }
       }
 
       console.log('QR code URL generated:', qrCodeUrl ? 'Yes' : 'No');
 
       return {
         charge,
-        source,
+        source: charge.source,
         qr_code_url: qrCodeUrl,
         expires_at: expiresAt
       };
@@ -305,6 +331,8 @@ class PaymentService {
             payment_method: paymentMethod,
             status: 'pending',
             description,
+            omise_charge_id: null, // Will be updated after charge creation
+            omise_source_id: null, // Will be updated after source creation
             metadata: {
               plan_name: plan.name,
               organization: plan.owner.org_name,

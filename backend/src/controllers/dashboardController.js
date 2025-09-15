@@ -220,20 +220,29 @@ class DashboardController {
       }
     });
 
-    const transformedMembers = members.map(member => ({
-      id: member.member_id,
-      email: member.email,
-      fullName: member.full_name,
-      createdAt: member.create_at,
-      subscriptions: member.subscriptions.map(sub => ({
-        id: sub.subscription_id,
-        planName: sub.plan.name,
-        status: sub.status,
-        startDate: sub.start_date,
-        endDate: sub.end_date,
-        price: parseFloat(sub.plan.price.toString())
-      }))
-    }));
+    const transformedMembers = members.map(member => {
+      // Get the most recent subscription status
+      const latestSubscription = member.subscriptions
+        .sort((a, b) => new Date(b.create_at) - new Date(a.create_at))[0];
+      
+      return {
+        id: member.member_id,
+        email: member.email,
+        fullName: member.full_name,
+        status: latestSubscription?.status || 'inactive',
+        subscriptionStart: latestSubscription?.start_date || member.create_at,
+        subscriptionEnd: latestSubscription?.end_date || null,
+        createdAt: member.create_at,
+        subscriptions: member.subscriptions.map(sub => ({
+          id: sub.subscription_id,
+          planName: sub.plan.name,
+          status: sub.status,
+          startDate: sub.start_date,
+          endDate: sub.end_date,
+          price: parseFloat(sub.plan.price.toString())
+        }))
+      };
+    });
 
     res.json(transformedMembers);
   });

@@ -18,4 +18,7 @@ router.post('/user-created', webhookController.handleUserCreated);
 // Legacy endpoints (for backward compatibility)
 router.post('/email-verification', webhookController.handleEmailVerification);
 
+// Omise payment webhook endpoints
+router.post('/omise-payment', webhookController.handleOmisePayment);
+
 module.exports = router;
