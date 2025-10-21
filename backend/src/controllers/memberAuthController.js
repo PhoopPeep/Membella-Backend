@@ -111,11 +111,7 @@ class MemberAuthController {
         rateLimited: result.rateLimited
       });
 
-      if (result.success) {
-        res.status(200).json(result);
-      } else {
-        res.status(200).json(result);
-      }
+      res.status(200).json(result);
 
     } catch (error) {
       console.error('MemberAuthController login error:', error);
@@ -310,14 +306,14 @@ class MemberAuthController {
 
       if (result.success) {
         res.status(200).json(result);
+      } else if (result.validationError) {
+        res.status(400).json(result);
+      } else if (result.invalidPassword) {
+        res.status(401).json(result);
+      } else if (result.rateLimited) {
+        res.status(429).json(result);
       } else {
-        // Return appropriate status codes based on error type
-        let statusCode = 500;
-        if (result.validationError) statusCode = 400;
-        if (result.invalidPassword) statusCode = 401;
-        if (result.rateLimited) statusCode = 429;
-        
-        res.status(statusCode).json(result);
+        res.status(500).json(result);
       }
 
     } catch (error) {
@@ -365,11 +361,7 @@ class MemberAuthController {
         rateLimited: result.rateLimited
       });
 
-      if (result.success) {
-        res.status(200).json(result);
-      } else {
-        res.status(200).json(result);
-      }
+      res.status(200).json(result);
 
     } catch (error) {
       console.error('MemberAuthController forgot password error:', error);
@@ -413,11 +405,7 @@ class MemberAuthController {
         message: result.message
       });
 
-      if (result.success) {
-        res.status(200).json(result);
-      } else {
-        res.status(200).json(result);
-      }
+      res.status(200).json(result);
 
     } catch (error) {
       console.error('MemberAuthController reset password error:', error);
@@ -453,11 +441,7 @@ class MemberAuthController {
         hasUser: !!result.user
       });
 
-      if (result.success) {
-        res.status(200).json(result);
-      } else {
-        res.status(200).json(result);
-      }
+      res.status(200).json(result);
 
     } catch (error) {
       console.error('MemberAuthController verify reset token error:', error);

@@ -5,7 +5,11 @@ const { ValidationError, NotFoundError, ForbiddenError } = require('../src/utils
 const mockPrismaClient = {
   subscription: {
     findMany: jest.fn(),
-    updateMany: jest.fn()
+    updateMany: jest.fn(),
+    deleteMany: jest.fn()
+  },
+  payment: {
+    deleteMany: jest.fn()
   }
 };
 
@@ -39,9 +43,9 @@ describe('UTC-16: Owner Delete Member Test Case', () => {
   });
 
   describe('Delete Member', () => {
-    // TC176: When deleteMember method is called with valid member ID, should delete member successfully
-    it('TC176: should delete member successfully when deleteMember method called with valid member ID', async () => {
-      // Setup mock responses
+    // TC176: When deleteMember method is called with member having active subscription, should return 400 error
+    it('TC176: should return 400 error when member has active subscription', async () => {
+      // Setup mock responses - member with active subscription
       mockPrismaClient.subscription.findMany.mockResolvedValue([
         {
           member_id: 'member-123',
@@ -51,7 +55,6 @@ describe('UTC-16: Owner Delete Member Test Case', () => {
           plan: { name: 'Test Plan' }
         }
       ]);
-      mockPrismaClient.subscription.updateMany.mockResolvedValue({ count: 1 });
       
       req.user = { userId: 'owner-123' };
       req.params = { memberId: 'member-123' };
@@ -59,12 +62,51 @@ describe('UTC-16: Owner Delete Member Test Case', () => {
       await memberController.deleteMember(req, res);
 
       expect(mockPrismaClient.subscription.findMany).toHaveBeenCalled();
-      expect(mockPrismaClient.subscription.updateMany).toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'Cannot remove member with active subscription',
+        detail: expect.stringContaining('active subscription'),
+        activeSubscriptions: 1
+      });
+    });
+
+    // TC176b: When deleteMember method is called with inactive member, should remove member successfully
+    it('TC176b: should remove member from owner plans when member has no active subscription', async () => {
+      // Setup mock responses - member with cancelled subscription
+      mockPrismaClient.subscription.findMany.mockResolvedValue([
+        {
+          member_id: 'member-123',
+          plan: { owner_id: 'owner-123' },
+          status: 'cancelled',
+          member: { member_id: 'member-123', full_name: 'John Doe', email: 'john@example.com' },
+          plan: { name: 'Test Plan' }
+        }
+      ]);
+      mockPrismaClient.payment.deleteMany.mockResolvedValue({ count: 2 });
+      mockPrismaClient.subscription.deleteMany.mockResolvedValue({ count: 1 });
+      
+      req.user = { userId: 'owner-123' };
+      req.params = { memberId: 'member-123' };
+
+      await memberController.deleteMember(req, res);
+
+      expect(mockPrismaClient.subscription.findMany).toHaveBeenCalled();
+      expect(mockPrismaClient.payment.deleteMany).toHaveBeenCalled();
+      expect(mockPrismaClient.subscription.deleteMany).toHaveBeenCalled();
       expect(res.status).toHaveBeenCalledWith(200);
       expect(res.json).toHaveBeenCalledWith({
         success: true,
-        message: 'Member subscriptions cancelled successfully',
-        cancelledSubscriptions: 1
+        message: 'Member removed from your plans successfully',
+        removedMember: {
+          id: 'member-123',
+          email: 'john@example.com',
+          fullName: 'John Doe'
+        },
+        deletedRecords: {
+          subscriptions: 1,
+          payments: 2
+        }
       });
     });
 
@@ -72,7 +114,6 @@ describe('UTC-16: Owner Delete Member Test Case', () => {
     it('TC177: should return 404 error when deleteMember method called with non-existent member', async () => {
       // Setup mock responses - no subscriptions found
       mockPrismaClient.subscription.findMany.mockResolvedValue([]);
-      mockPrismaClient.subscription.updateMany.mockResolvedValue({ count: 0 });
       
       req.user = { userId: 'owner-123' };
       req.params = { memberId: 'non-existent-member' };
@@ -83,7 +124,7 @@ describe('UTC-16: Owner Delete Member Test Case', () => {
       expect(res.status).toHaveBeenCalledWith(404);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        message: 'Member not found or has no active subscriptions'
+        message: 'Member not found or does not belong to your plans'
       });
     });
 
@@ -91,7 +132,6 @@ describe('UTC-16: Owner Delete Member Test Case', () => {
     it('TC178: should return 404 error when deleteMember method called with member not in owner\'s plans', async () => {
       // Setup mock responses - no subscriptions found (member not in owner's plans)
       mockPrismaClient.subscription.findMany.mockResolvedValue([]);
-      mockPrismaClient.subscription.updateMany.mockResolvedValue({ count: 0 });
       
       req.user = { userId: 'owner-123' };
       req.params = { memberId: 'member-456' }; // Member not in owner's plans
@@ -102,7 +142,7 @@ describe('UTC-16: Owner Delete Member Test Case', () => {
       expect(res.status).toHaveBeenCalledWith(404);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        message: 'Member not found or has no active subscriptions'
+        message: 'Member not found or does not belong to your plans'
       });
     });
 
@@ -110,7 +150,6 @@ describe('UTC-16: Owner Delete Member Test Case', () => {
     it('TC179: should return 500 error when deleteMember method encounters database error', async () => {
       // Setup mock responses - database error
       mockPrismaClient.subscription.findMany.mockRejectedValue(new Error('Database connection failed'));
-      mockPrismaClient.subscription.updateMany.mockResolvedValue({ count: 0 });
       
       req.user = { userId: 'owner-123' };
       req.params = { memberId: 'member-123' };
@@ -121,7 +160,7 @@ describe('UTC-16: Owner Delete Member Test Case', () => {
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        message: 'Failed to delete member',
+        message: 'Failed to remove member',
         error: expect.any(String)
       });
     });
@@ -130,7 +169,6 @@ describe('UTC-16: Owner Delete Member Test Case', () => {
     it('TC180: should return 500 error when deleteMember method encounters database error', async () => {
       // Setup mock responses - database error
       mockPrismaClient.subscription.findMany.mockRejectedValue(new Error('Database connection failed'));
-      mockPrismaClient.subscription.updateMany.mockResolvedValue({ count: 0 });
       
       req.user = { userId: 'owner-123' };
       req.params = { memberId: 'member-123' };
@@ -141,7 +179,7 @@ describe('UTC-16: Owner Delete Member Test Case', () => {
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        message: 'Failed to delete member',
+        message: 'Failed to remove member',
         error: expect.any(String)
       });
     });

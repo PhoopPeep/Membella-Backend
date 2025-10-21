@@ -23,10 +23,10 @@ class OmiseDebugger {
       );
       
       console.log('Payment methods supported:');
-      capabilities.payment_methods.forEach(method => {
+      for (const method of capabilities.payment_methods) {
         const supported = method.currencies.includes('THB') ? '✅' : '❌';
         console.log(`   ${supported} ${method.name} (${method.currencies.join(', ')})`);
-      });
+      }
       
       return { success: true, promptpaySupported };
       
@@ -138,14 +138,14 @@ class OmiseDebugger {
       
       console.log(`Found ${charges.data.length} recent charges:`);
       
-      charges.data.forEach((charge, index) => {
+      for (const [index, charge] of charges.data.entries()) {
         console.log(`   ${index + 1}. ${charge.id}`);
         console.log(`      Amount: ${charge.amount} ${charge.currency}`);
         console.log(`      Status: ${charge.status}`);
         console.log(`      Method: ${charge.source?.type || charge.card?.brand || 'card'}`);
         console.log(`      Created: ${charge.created_at}`);
         console.log('');
-      });
+      }
       
       return { success: true, charges: charges.data };
       
@@ -232,15 +232,17 @@ if (require.main === module) {
   console.log('Omise Mode:', process.env.OMISE_SECRET_KEY?.includes('test') ? 'Test' : 'Live');
   console.log('');
   
-  OmiseDebugger.runFullDiagnostics()
-    .then(() => {
+  // Use top-level await pattern for CommonJS
+  (async function runDiagnostics() {
+    try {
+      await OmiseDebugger.runFullDiagnostics();
       console.log('\nDiagnostics completed');
       process.exit(0);
-    })
-    .catch(error => {
+    } catch (error) {
       console.error('\nDiagnostics failed:', error);
       process.exit(1);
-    });
+    }
+  })();
 }
 
 module.exports = OmiseDebugger;

@@ -66,6 +66,59 @@ const OMISE_CONFIG = {
   }
 };
 
+// Check if payment method is supported
+function checkPaymentMethodSupport(supportedMethods, methodName) {
+  return supportedMethods.some(method => 
+    method.name === methodName && method.currencies.includes('THB')
+  );
+}
+
+// Log payment method capabilities
+function logPaymentCapabilities(cardSupported, promptpaySupported) {
+  console.log('Payment method capabilities:');
+  console.log('- Card payments:', cardSupported ? 'Supported ✓' : 'Not supported ✗');
+  console.log('- PromptPay payments:', promptpaySupported ? 'Supported ✓' : 'Not supported ✗');
+  
+  if (!cardSupported) {
+    console.warn('Card payments are not enabled for this account. Please contact Omise support at support@omise.co');
+  }
+  
+  if (!promptpaySupported) {
+    console.warn('PromptPay is not enabled for this account. Please contact Omise support at support@omise.co');
+  }
+}
+
+// Log available payment methods
+function logAvailablePaymentMethods(supportedMethods) {
+  console.log('Available payment methods:');
+  for (const method of supportedMethods) {
+    console.log(`  - ${method.name}: ${method.currencies.join(', ')}`);
+  }
+}
+
+// Handle connection error
+function handleConnectionError(error) {
+  console.error('Omise connection failed:', error.message);
+  
+  if (error.response) {
+    console.error('API Response:', error.response.status, error.response.statusText);
+    if (error.response.data) {
+      console.error('Response Data:', error.response.data);
+    }
+  }
+  
+  if (error.code) {
+    console.error('Error Code:', error.code);
+  }
+
+  // Common error troubleshooting
+  if (error.message.includes('authentication')) {
+    console.error('Authentication failed. Please check your OMISE_SECRET_KEY');
+  } else if (error.message.includes('network') || error.code === 'ENOTFOUND') {
+    console.error('Network error. Please check your internet connection');
+  }
+}
+
 // Test the connection function
 async function testOmiseConnection() {
   try {
@@ -83,34 +136,15 @@ async function testOmiseConnection() {
     
     // Check capabilities
     const capabilities = await omise.capability.retrieve();
+    const supportedMethods = capabilities.payment_methods || [];
     
     // Check supported payment methods
-    const supportedMethods = capabilities.payment_methods || [];
-    const cardSupported = supportedMethods.some(method => 
-      method.name === 'card' && method.currencies.includes('THB')
-    );
+    const cardSupported = checkPaymentMethodSupport(supportedMethods, 'card');
+    const promptpaySupported = checkPaymentMethodSupport(supportedMethods, 'promptpay');
     
-    const promptpaySupported = supportedMethods.some(method => 
-      method.name === 'promptpay' && method.currencies.includes('THB')
-    );
-    
-    console.log('Payment method capabilities:');
-    console.log('- Card payments:', cardSupported ? 'Supported ✓' : 'Not supported ✗');
-    console.log('- PromptPay payments:', promptpaySupported ? 'Supported ✓' : 'Not supported ✗');
-    
-    if (!cardSupported) {
-      console.warn('Card payments are not enabled for this account. Please contact Omise support at support@omise.co');
-    }
-    
-    if (!promptpaySupported) {
-      console.warn('PromptPay is not enabled for this account. Please contact Omise support at support@omise.co');
-    }
-    
-    // Log all available payment methods
-    console.log('Available payment methods:');
-    supportedMethods.forEach(method => {
-      console.log(`  - ${method.name}: ${method.currencies.join(', ')}`);
-    });
+    // Log capabilities and available methods
+    logPaymentCapabilities(cardSupported, promptpaySupported);
+    logAvailablePaymentMethods(supportedMethods);
     
     return {
       connected: true,
@@ -120,27 +154,7 @@ async function testOmiseConnection() {
       supportedMethods
     };
   } catch (error) {
-    console.error('Omise connection failed:', error.message);
-    
-    // More detailed error info
-    if (error.response) {
-      console.error('API Response:', error.response.status, error.response.statusText);
-      if (error.response.data) {
-        console.error('Response Data:', error.response.data);
-      }
-    }
-    
-    if (error.code) {
-      console.error('Error Code:', error.code);
-    }
-
-    // Common error troubleshooting
-    if (error.message.includes('authentication')) {
-      console.error('Authentication failed. Please check your OMISE_SECRET_KEY');
-    } else if (error.message.includes('network') || error.code === 'ENOTFOUND') {
-      console.error('Network error. Please check your internet connection');
-    }
-    
+    handleConnectionError(error);
     return {
       connected: false,
       error: error.message
@@ -167,9 +181,9 @@ function validateToken(token) {
 
 // Validate amount for different payment methods
 function validateAmount(amount, paymentMethod) {
-  const numAmount = parseFloat(amount);
+  const numAmount = Number.parseFloat(amount);
   
-  if (isNaN(numAmount) || numAmount <= 0) {
+  if (Number.isNaN(numAmount) || numAmount <= 0) {
     return { valid: false, error: 'Amount must be a positive number' };
   }
   
@@ -230,18 +244,28 @@ function formatOmiseError(error) {
   };
 }
 
-// Log successful initialization
-if (process.env.NODE_ENV !== 'test') {
-  testOmiseConnection().then(result => {
+// Initialize Omise
+async function initializeOmise() {
+  if (process.env.NODE_ENV === 'test') {
+    return;
+  }
+
+  try {
+    const result = await testOmiseConnection();
     if (result.connected) {
       console.log('Omise initialized successfully');
     } else {
       console.error('Omise initialization failed:', result.error);
     }
-  }).catch(error => {
+  } catch (error) {
     console.error('Omise initialization error:', error.message);
-  });
+  }
 }
+
+// Initialize Omise connection
+(async () => {
+  await initializeOmise();
+})();
 
 module.exports = {
   omise,

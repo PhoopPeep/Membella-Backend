@@ -61,7 +61,7 @@ class MemberController {
 
       // convert data proper to frontend
       const transformedOwners = owners.map(owner => {
-        const planPrices = owner.plans.map(plan => parseFloat(plan.price.toString()));
+        const planPrices = owner.plans.map(plan => Number.parseFloat(plan.price.toString()));
         const minPrice = planPrices.length > 0 ? Math.min(...planPrices) : 0;
         const maxPrice = planPrices.length > 0 ? Math.max(...planPrices) : 0;
         
@@ -100,7 +100,7 @@ class MemberController {
     }
   });
 
-  // Get plans for specific owner - FIXED PRISMA QUERY
+  // Get plans for specific owner
   getOwnerPlans = asyncHandler(async (req, res) => {
     try {
       const { ownerId } = req.params;
@@ -158,7 +158,7 @@ class MemberController {
 
       console.log('Owner found:', owner.org_name);
 
-      // Get plans of owner with features - FIXED QUERY
+      // Get plans of owner with features
       console.log('Fetching plans for owner...');
       const plans = await prisma.plan.findMany({
         where: {
@@ -186,10 +186,9 @@ class MemberController {
 
       console.log(`Found ${plans.length} plans for owner ${owner.org_name}`);
 
-      // Transform plan data with better error handling and filter out deleted features
+      // Transform plan data
       const transformedPlans = plans.map(plan => {
         try {
-          // Filter out any plan_features where feature is null or deleted
           const validFeatures = plan.plan_features
             .filter(pf => pf.feature && pf.feature.feature_id && !pf.feature.delete_at)
             .map(pf => ({
@@ -202,7 +201,7 @@ class MemberController {
             id: plan.plan_id,
             name: plan.name || 'Unnamed Plan',
             description: plan.description || 'No description available',
-            price: parseFloat(plan.price.toString()),
+            price: Number.parseFloat(plan.price.toString()),
             duration: plan.duration,
             features: validFeatures,
             createdAt: plan.create_at,
@@ -210,12 +209,11 @@ class MemberController {
           };
         } catch (transformError) {
           console.error('Error transforming plan:', plan.plan_id, transformError);
-          // Return a safe default if transformation fails
           return {
             id: plan.plan_id,
             name: plan.name || 'Unnamed Plan',
             description: plan.description || 'No description available',
-            price: parseFloat(plan.price.toString()) || 0,
+            price: Number.parseFloat(plan.price.toString()) || 0,
             duration: plan.duration || 0,
             features: [],
             createdAt: plan.create_at,
@@ -233,7 +231,6 @@ class MemberController {
       console.error('Error in getOwnerPlans:', error);
       console.error('Error stack:', error.stack);
       
-      // Determine appropriate error status and message
       let statusCode = 500;
       let message = 'Failed to fetch organization plans';
       
@@ -340,7 +337,7 @@ class MemberController {
         const activeSubscription = member.subscriptions.find(sub => sub.status === 'active');
         const allPayments = member.payments.map(payment => ({
           id: payment.payment_id,
-          amount: parseFloat(payment.amount.toString()),
+          amount: Number.parseFloat(payment.amount.toString()),
           status: payment.status,
           planName: payment.plan.name,
           createdAt: payment.create_at
@@ -354,7 +351,7 @@ class MemberController {
           currentPlan: activeSubscription ? {
             id: activeSubscription.plan.plan_id,
             name: activeSubscription.plan.name,
-            price: parseFloat(activeSubscription.plan.price.toString()),
+            price: Number.parseFloat(activeSubscription.plan.price.toString()),
             duration: activeSubscription.plan.duration,
             startDate: activeSubscription.start_date,
             endDate: activeSubscription.end_date,
@@ -455,7 +452,7 @@ class MemberController {
         id: plan.plan_id,
         name: plan.name || 'Unnamed Plan',
         description: plan.description || 'No description available',
-        price: parseFloat(plan.price.toString()),
+        price: Number.parseFloat(plan.price.toString()),
         duration: plan.duration,
         features: validFeatures,
         organization: plan.owner.org_name,
@@ -521,13 +518,13 @@ class MemberController {
         const activeSubscriptions = plan.subscriptions.filter(sub => sub.status === 'active');
         const totalRevenue = plan.subscriptions
           .filter(sub => sub.status === 'active')
-          .reduce((sum, sub) => sum + parseFloat(plan.price.toString()), 0);
+          .reduce((sum) => sum + Number.parseFloat(plan.price.toString()), 0);
 
         return {
           id: plan.plan_id,
           name: plan.name,
           description: plan.description,
-          price: parseFloat(plan.price.toString()),
+          price: Number.parseFloat(plan.price.toString()),
           duration: plan.duration,
           totalSubscriptions: plan._count.subscriptions,
           activeSubscriptions: activeSubscriptions.length,
@@ -554,22 +551,21 @@ class MemberController {
     }
   });
 
-  // Delete member (soft delete by cancelling all subscriptions)
+  // Remove member from owner's plans
   deleteMember = asyncHandler(async (req, res) => {
     try {
       const { memberId } = req.params;
       const ownerId = req.user.userId;
       
-      console.log('MemberController: Deleting member:', memberId, 'for owner:', ownerId);
+      console.log('MemberController: Removing member from owner plans:', memberId, 'for owner:', ownerId);
 
-      // Check if member has subscriptions to this owner's plans
+      // Get all subscriptions for this member with this owner
       const memberSubscriptions = await prisma.subscription.findMany({
         where: {
           member_id: memberId,
           plan: {
             owner_id: ownerId
-          },
-          status: 'active'
+          }
         },
         include: {
           member: {
@@ -589,39 +585,66 @@ class MemberController {
       if (memberSubscriptions.length === 0) {
         return res.status(404).json({
           success: false,
-          message: 'Member not found or has no active subscriptions'
+          message: 'Member not found or does not belong to your plans'
         });
       }
 
-      // Cancel all active subscriptions
-      await prisma.subscription.updateMany({
+      // Check if member has any active subscriptions
+      const activeSubscriptions = memberSubscriptions.filter(sub => sub.status === 'active');
+      
+      if (activeSubscriptions.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot remove member with active subscription',
+          detail: 'Member still has an active subscription. Please wait for the subscription to expire or cancel it first.',
+          activeSubscriptions: activeSubscriptions.length
+        });
+      }
+
+      // Delete member's payments related to this owner
+      const deletedPayments = await prisma.payment.deleteMany({
+        where: {
+          member_id: memberId,
+          plan: {
+            owner_id: ownerId
+          }
+        }
+      });
+
+      // Delete member's subscriptions related to this owner (only non-active ones)
+      const deletedSubscriptions = await prisma.subscription.deleteMany({
         where: {
           member_id: memberId,
           plan: {
             owner_id: ownerId
           },
-          status: 'active'
-        },
-        data: {
-          status: 'cancelled',
-          end_date: new Date(),
-          update_at: new Date()
+          status: {
+            not: 'active'
+          }
         }
       });
 
-      console.log(`Cancelled ${memberSubscriptions.length} subscriptions for member`);
+      console.log(`Member ${memberId} removed from owner's plans. Deleted ${deletedSubscriptions.count} subscriptions and ${deletedPayments.count} payments`);
 
       res.status(200).json({
         success: true,
-        message: 'Member subscriptions cancelled successfully',
-        cancelledSubscriptions: memberSubscriptions.length
+        message: 'Member removed from your plans successfully',
+        removedMember: {
+          id: memberSubscriptions[0].member.member_id,
+          email: memberSubscriptions[0].member.email,
+          fullName: memberSubscriptions[0].member.full_name
+        },
+        deletedRecords: {
+          subscriptions: deletedSubscriptions.count,
+          payments: deletedPayments.count
+        }
       });
     } catch (error) {
       console.error('Error in deleteMember:', error);
       
       res.status(500).json({
         success: false,
-        message: 'Failed to delete member',
+        message: 'Failed to remove member',
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
     }

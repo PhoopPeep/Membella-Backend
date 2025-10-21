@@ -8,7 +8,15 @@ class AuthService {
   constructor() {
     this.userRepository = new UserRepository();
     this.supabase = supabase;
-    this.jwtSecret = process.env.JWT_SECRET || '65YHSNjVcJ9q4V2GGGlxvQ1hmGt2x344Po8CYi+U9aD5mdiMJlGMXLHF7YyC5Q5ZTCKWOeWfMYXkqDBG4SxSFw==';
+    this.jwtSecret = process.env.JWT_SECRET;
+    
+    // Debug and validate JWT_SECRET
+    console.log('AuthService initialized with JWT_SECRET:', this.jwtSecret ? 'Present' : 'Missing');
+    if (!this.jwtSecret) {
+      console.error('CRITICAL: JWT_SECRET is not defined in environment variables!');
+      console.error('Available env vars:', Object.keys(process.env).filter(key => key.includes('JWT') || key.includes('SECRET')));
+      throw new Error('JWT_SECRET environment variable is required but not found');
+    }
   }
 
   async register(userData) {
@@ -44,13 +52,12 @@ class AuthService {
       // Create user in Supabase Auth
       console.log('AuthService: Creating user in Supabase Auth...');
       
-      // Set default frontend URL if not provided
-      const frontendUrl = process.env.OWNER_FRONTEND_URL || 'http://localhost:5173';
+      const frontendUrl = process.env.OWNER_FRONTEND_URL;
       const redirectUrl = `${frontendUrl}/auth/callback`;
       
-      console.log('🔧 Frontend URL:', frontendUrl);
-      console.log('🔧 Redirect URL:', redirectUrl);
-      console.log('🔧 Supabase URL:', process.env.SUPABASE_URL);
+      console.log('Frontend URL:', frontendUrl);
+      console.log('Redirect URL:', redirectUrl);
+      console.log('Supabase URL:', process.env.SUPABASE_URL);
       
       const { data: authData, error: authError } = await this.supabase.auth.signUp({
         email: userData.email.toLowerCase().trim(),
@@ -250,7 +257,7 @@ class AuthService {
         type: 'signup',
         email: email.toLowerCase().trim(),
         options: {
-          emailRedirectTo: `${process.env.OWNER_FRONTEND_URL || 'http://localhost:5173'}/auth/callback`
+          emailRedirectTo: `${process.env.OWNER_FRONTEND_URL}/auth/callback`
         }
       });
 
@@ -309,7 +316,6 @@ class AuthService {
       // Check that email exists in the database
       const user = await this.userRepository.findByEmail(email);
       if (!user) {
-        // Return error if email does not exist in the system
         return {
           success: false,
           message: 'No account found with this email address.',
@@ -319,16 +325,15 @@ class AuthService {
       }
 
       // Use Supabase's built-in password reset functionality
-      const frontendUrl = process.env.OWNER_FRONTEND_URL || 'http://localhost:5173'
+      const frontendUrl = process.env.OWNER_FRONTEND_URL
       const redirectUrl = `${frontendUrl}/reset-password`
       
-      console.log('🔧 Sending password reset email with redirect URL:', redirectUrl)
-      console.log('🔧 Supabase URL:', process.env.SUPABASE_URL)
-      console.log('🔧 Frontend URL:', process.env.OWNER_FRONTEND_URL)
+      console.log('Sending password reset email with redirect URL:', redirectUrl)
+      console.log('Supabase URL:', process.env.SUPABASE_URL)
+      console.log('Frontend URL:', process.env.OWNER_FRONTEND_URL)
       
-      const { data, error } = await this.supabase.auth.resetPasswordForEmail(email, {
+      const { error } = await this.supabase.auth.resetPasswordForEmail(email, {
         redirectTo: redirectUrl,
-        // Add custom data for email template
         data: {
           site_name: 'Membella',
           support_email: 'support@membella.com'
@@ -378,12 +383,12 @@ class AuthService {
   // Reset password using Supabase session
   async resetPassword(accessToken, newPassword) {
     try {
-      console.log('🔧 AuthService: Attempting to reset password with Supabase session');
-      console.log('🔧 AuthService: Token present:', !!accessToken);
-      console.log('🔧 AuthService: Password present:', !!newPassword);
+      console.log('Attempting to reset password with Supabase session');
+      console.log('Token present:', !!accessToken);
+      console.log('Password present:', !!newPassword);
 
       if (!accessToken || !newPassword) {
-        console.log('🔧 AuthService: Validation failed - missing token or password');
+        console.log('Validation failed - missing token or password');
         return {
           success: false,
           message: 'Reset token and new password are required',
@@ -392,7 +397,7 @@ class AuthService {
       }
 
       if (newPassword.length < 8) {
-        console.log('🔧 AuthService: Validation failed - password too short');
+        console.log('Validation failed - password too short');
         return {
           success: false,
           message: 'Password must be at least 8 characters long',
@@ -400,7 +405,7 @@ class AuthService {
         };
       }
 
-      console.log('🔧 AuthService: Verifying access token with Supabase...');
+      console.log('Verifying access token with Supabase...');
       // Verify the access token with Supabase
       const { data: { user }, error: userError } = await this.supabase.auth.getUser(accessToken);
       
@@ -413,10 +418,10 @@ class AuthService {
         };
       }
 
-      console.log('🔧 AuthService: User verified, updating password...');
+      console.log('User verified, updating password...');
       // For password reset, we need to use admin API to update password
       // because the user doesn't have an active session
-      const { data: updateData, error: updateError } = await this.supabase.auth.admin.updateUserById(
+      const { error: updateError } = await this.supabase.auth.admin.updateUserById(
         user.id,
         { password: newPassword }
       );
@@ -429,7 +434,7 @@ class AuthService {
         };
       }
 
-      console.log('🔧 AuthService: Password updated successfully');
+      console.log('Password updated successfully');
 
       console.log('Password reset successful for user:', user.id);
 
@@ -482,7 +487,7 @@ class AuthService {
     }
   }
 
-  // Generate reset token (for testing purposes)
+  // Generate reset token
   generateResetToken(userId) {
     return jwt.sign(
       { userId, type: 'password_reset' },
@@ -491,15 +496,13 @@ class AuthService {
     );
   }
 
-  // Send reset email (for testing purposes)
+  // Send reset email
   async sendResetEmail(email, token, orgName) {
-    // This would typically send an actual email
-    // For testing purposes, we'll just return true
     console.log(`Sending reset email to ${email} for ${orgName} with token: ${token}`);
     return true;
   }
 
-  // Validate reset token (for testing purposes)
+  // Validate reset token
   async validateResetToken(token) {
     try {
       const decoded = jwt.verify(token, this.jwtSecret);
@@ -515,10 +518,8 @@ class AuthService {
     }
   }
 
-  // Invalidate reset token (for testing purposes)
+  // Invalidate reset token
   async invalidateResetToken(token) {
-    // In a real implementation, you would store used tokens in a blacklist
-    // For testing purposes, we'll just return true
     console.log(`Invalidating reset token: ${token}`);
     return true;
   }

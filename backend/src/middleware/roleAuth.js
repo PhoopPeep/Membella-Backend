@@ -1,8 +1,8 @@
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || '65YHSNjVcJ9q4V2GGGlxvQ1hmGt2x344Po8CYi+U9aD5mdiMJlGMXLHF7YyC5Q5ZTCKWOeWfMYXkqDBG4SxSFw==';
+const JWT_SECRET = process.env.JWT_SECRET;
 
-// Middleware for Owner
+// Owner authentication
 const requireOwner = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -37,26 +37,42 @@ const requireOwner = (req, res, next) => {
   }
 };
 
-// Middleware for Member
+// Member authentication
 const requireMember = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
   
+  console.log('requireMember middleware:', {
+    hasAuthHeader: !!authHeader,
+    hasToken: !!token,
+    url: req.url,
+    method: req.method,
+    authHeader: authHeader ? `${authHeader.substring(0, 20)}...` : 'None'
+  });
+  
   if (!token) {
+    console.log('No token provided for member access');
     return res.status(401).json({ message: 'Access token required.' });
   }
   
   try {
     const user = jwt.verify(token, JWT_SECRET);
+    console.log('Member token verified:', { 
+      userId: user.userId, 
+      role: user.role, 
+      email: user.email 
+    });
     
     // Check that user is member
     if (user.role !== 'member') {
+      console.log('User is not member:', user.role);
       return res.status(403).json({ message: 'Member access required.' });
     }
     
     req.user = user;
     next();
   } catch (error) {
+    console.log('Member token verification failed:', error.message);
     return res.status(403).json({ message: 'Invalid or expired token.' });
   }
 };

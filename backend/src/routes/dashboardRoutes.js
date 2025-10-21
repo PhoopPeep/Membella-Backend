@@ -6,7 +6,6 @@ const { apiRateLimiter } = require('../middleware/rateLimiter');
 const router = express.Router();
 const dashboardController = new DashboardController();
 
-// All dashboard routes require authentication
 router.use(authenticateToken);
 
 router.get('/stats', apiRateLimiter, dashboardController.getDashboardStats);

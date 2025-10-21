@@ -1,10 +1,67 @@
 const { asyncHandler } = require('../utils/errorHandler');
 const { getPrismaClient } = require('../config/database');
-const crypto = require('crypto');
+const crypto = require('node:crypto');
 
 class WebhookController {
   constructor() {
     this.prisma = getPrismaClient();
+  }
+
+  // Helper: Verify Supabase webhook signature
+  verifySupabaseSignature(req, res) {
+    const webhookSecret = process.env.SUPABASE_WEBHOOK_SECRET;
+    if (webhookSecret) {
+      const signature = req.headers['x-supabase-signature'];
+      if (!signature) {
+        console.log('Missing webhook signature');
+        res.status(401).json({ error: 'Missing webhook signature' });
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Helper: Create owner record
+  async createOwnerRecord(user, userMetadata) {
+    try {
+      const newOwner = await this.prisma.owner.create({
+        data: {
+          owner_id: user.id,
+          org_name: userMetadata.org_name || 'Default Organization',
+          email: user.email,
+          password: '', // Password is handled by Supabase
+          description: userMetadata.description || null,
+          contact_info: userMetadata.contact_info || null,
+          logo: userMetadata.logo || null,
+          create_at: new Date(),
+          update_at: new Date()
+        }
+      });
+      console.log('Owner record created:', newOwner.owner_id);
+    } catch (dbError) {
+      console.error('Error creating owner record:', dbError);
+    }
+  }
+
+  // Helper: Create member record
+  async createMemberRecord(user, userMetadata) {
+    try {
+      const newMember = await this.prisma.member.create({
+        data: {
+          member_id: user.id,
+          full_name: userMetadata.full_name || 'Unknown',
+          email: user.email,
+          password: '', // Password is handled by Supabase
+          phone: userMetadata.phone || null,
+          role: userMetadata.role || 'member',
+          create_at: new Date(),
+          update_at: new Date()
+        }
+      });
+      console.log('Member record created:', newMember.member_id);
+    } catch (dbError) {
+      console.error('Error creating member record:', dbError);
+    }
   }
 
   // Handle user created webhook from Supabase
@@ -15,24 +72,15 @@ class WebhookController {
 
       const { type, table, record } = req.body;
 
-      // Verify webhook signature (optional but recommended)
-      const webhookSecret = process.env.SUPABASE_WEBHOOK_SECRET;
-      if (webhookSecret) {
-        const signature = req.headers['x-supabase-signature'];
-        if (!signature) {
-          console.log('Missing webhook signature');
-          return res.status(401).json({ error: 'Missing webhook signature' });
-        }
-        // Add signature verification logic here if needed
-      }
+      // Verify webhook signature
+      if (!this.verifySupabaseSignature(req, res)) return;
 
-      // Handle user creation event
+      // Handle user creation
       if (type === 'INSERT' && table === 'users') {
         const user = record;
         console.log('New user created:', user.id, user.email);
 
         // Check if this is an owner or member based on email domain or other criteria
-        // For now, we'll check the user metadata to determine type
         const userMetadata = user.raw_user_meta_data || {};
         const isOwner = userMetadata.role === 'owner' || userMetadata.org_name;
         const isMember = userMetadata.role === 'member' || userMetadata.full_name;
@@ -41,46 +89,9 @@ class WebhookController {
         console.log('User type determination:', { isOwner, isMember });
 
         if (isOwner) {
-          // Create owner record in database
-          try {
-            const newOwner = await this.prisma.owner.create({
-              data: {
-                owner_id: user.id,
-                org_name: userMetadata.org_name || 'Default Organization',
-                email: user.email,
-                password: '', // Password is handled by Supabase
-                description: userMetadata.description || null,
-                contact_info: userMetadata.contact_info || null,
-                logo: userMetadata.logo || null,
-                create_at: new Date(),
-                update_at: new Date()
-              }
-            });
-            console.log('Owner record created:', newOwner.owner_id);
-          } catch (dbError) {
-            console.error('Error creating owner record:', dbError);
-            // Don't fail the webhook, just log the error
-          }
+          await this.createOwnerRecord(user, userMetadata);
         } else if (isMember) {
-          // Create member record in database
-          try {
-            const newMember = await this.prisma.member.create({
-              data: {
-                member_id: user.id,
-                full_name: userMetadata.full_name || 'Unknown',
-                email: user.email,
-                password: '', // Password is handled by Supabase
-                phone: userMetadata.phone || null,
-                role: userMetadata.role || 'member',
-                create_at: new Date(),
-                update_at: new Date()
-              }
-            });
-            console.log('Member record created:', newMember.member_id);
-          } catch (dbError) {
-            console.error('Error creating member record:', dbError);
-            // Don't fail the webhook, just log the error
-          }
+          await this.createMemberRecord(user, userMetadata);
         } else {
           console.log('Unknown user type, skipping database record creation');
         }
@@ -94,7 +105,32 @@ class WebhookController {
     }
   });
 
-  // Handle email verification webhook from Supabase
+  // Helper: Process email verification
+  async processEmailVerification(user) {
+    try {
+      // Check if this is an owner
+      const owner = await this.prisma.owner.findUnique({
+        where: { owner_id: user.id }
+      });
+      
+      if (owner) {
+        console.log('Owner email verified:', owner.owner_id);
+      } else {
+        // Check if this is a member
+        const member = await this.prisma.member.findUnique({
+          where: { member_id: user.id }
+        });
+        
+        if (member) {
+          console.log('Member email verified:', member.member_id);
+        }
+      }
+    } catch (dbError) {
+      console.error('Error updating user verification status:', dbError);
+    }
+  }
+
+  // Handle email verification
   handleEmailVerification = asyncHandler(async (req, res) => {
     try {
       console.log('Webhook: Email verification event received');
@@ -102,51 +138,18 @@ class WebhookController {
 
       const { type, table, record } = req.body;
 
-      // Verify webhook signature (optional but recommended)
-      const webhookSecret = process.env.SUPABASE_WEBHOOK_SECRET;
-      if (webhookSecret) {
-        const signature = req.headers['x-supabase-signature'];
-        if (!signature) {
-          console.log('Missing webhook signature');
-          return res.status(401).json({ error: 'Missing webhook signature' });
-        }
-        // Add signature verification logic here if needed
-      }
+      // Verify webhook signature
+      if (!this.verifySupabaseSignature(req, res)) return;
 
-      // Handle email confirmation event
+      // Handle email confirmation
       if (type === 'UPDATE' && table === 'users') {
         const user = record;
         const oldUser = old_record;
         
-        // Check if email_confirmed_at was just set (email verification)
+        // Check if email_confirmed_at was just set
         if (!oldUser.email_confirmed_at && user.email_confirmed_at) {
           console.log('Email verification completed for user:', user.id, user.email);
-          
-          // Update user status in our database if needed
-          try {
-            // Check if this is an owner
-            const owner = await this.prisma.owner.findUnique({
-              where: { owner_id: user.id }
-            });
-            
-            if (owner) {
-              console.log('Owner email verified:', owner.owner_id);
-              // You can add additional logic here if needed
-            } else {
-              // Check if this is a member
-              const member = await this.prisma.member.findUnique({
-                where: { member_id: user.id }
-              });
-              
-              if (member) {
-                console.log('Member email verified:', member.member_id);
-                // You can add additional logic here if needed
-              }
-            }
-          } catch (dbError) {
-            console.error('Error updating user verification status:', dbError);
-            // Don't fail the webhook, just log the error
-          }
+          await this.processEmailVerification(user);
         }
       }
 
@@ -158,7 +161,30 @@ class WebhookController {
     }
   });
 
-  // Handle user updated webhook (for email verification and other updates)
+  // Helper: Process user update
+  async processUserUpdate(user, oldUser) {
+    console.log('User update details:', {
+      userId: user.id,
+      email: user.email,
+      emailConfirmed: !!user.email_confirmed_at,
+      oldEmailConfirmed: !!oldUser.email_confirmed_at,
+      lastSignInAt: user.last_sign_in_at,
+      oldLastSignInAt: oldUser.last_sign_in_at
+    });
+
+    // Check if email was just confirmed
+    if (!oldUser.email_confirmed_at && user.email_confirmed_at) {
+      console.log('Email verification completed for user:', user.id, user.email);
+      await this.processEmailVerification(user);
+    }
+
+    // Check if user signed in
+    if (!oldUser.last_sign_in_at && user.last_sign_in_at) {
+      console.log('User signed in:', user.id, user.email);
+    }
+  }
+
+  // Handle user updated webhook
   handleUserUpdated = asyncHandler(async (req, res) => {
     try {
       console.log('Webhook: User updated event received');
@@ -166,68 +192,14 @@ class WebhookController {
 
       const { type, table, record } = req.body;
 
-      // Verify webhook signature (optional but recommended)
-      const webhookSecret = process.env.SUPABASE_WEBHOOK_SECRET;
-      if (webhookSecret) {
-        const signature = req.headers['x-supabase-signature'];
-        if (!signature) {
-          console.log('Missing webhook signature');
-          return res.status(401).json({ error: 'Missing webhook signature' });
-        }
-        // Add signature verification logic here if needed
-      }
+      // Verify webhook signature
+      if (!this.verifySupabaseSignature(req, res)) return;
 
-      // Handle user update event
+      // Handle user update
       if (type === 'UPDATE' && table === 'users') {
         const user = record;
         const oldUser = old_record;
-        
-        console.log('User update details:', {
-          userId: user.id,
-          email: user.email,
-          emailConfirmed: !!user.email_confirmed_at,
-          oldEmailConfirmed: !!oldUser.email_confirmed_at,
-          lastSignInAt: user.last_sign_in_at,
-          oldLastSignInAt: oldUser.last_sign_in_at
-        });
-
-        // Check if email was just confirmed (email verification)
-        if (!oldUser.email_confirmed_at && user.email_confirmed_at) {
-          console.log('🎉 Email verification completed for user:', user.id, user.email);
-          
-          // Update user status in our database if needed
-          try {
-            // Check if this is an owner
-            const owner = await this.prisma.owner.findUnique({
-              where: { owner_id: user.id }
-            });
-            
-            if (owner) {
-              console.log('✅ Owner email verified:', owner.owner_id);
-              // You can add additional logic here if needed
-              // For example, send welcome email, update user status, etc.
-            } else {
-              // Check if this is a member
-              const member = await this.prisma.member.findUnique({
-                where: { member_id: user.id }
-              });
-              
-              if (member) {
-                console.log('✅ Member email verified:', member.member_id);
-                // You can add additional logic here if needed
-              }
-            }
-          } catch (dbError) {
-            console.error('Error updating user verification status:', dbError);
-            // Don't fail the webhook, just log the error
-          }
-        }
-
-        // Check if user signed in (optional - for analytics or logging)
-        if (!oldUser.last_sign_in_at && user.last_sign_in_at) {
-          console.log('User signed in:', user.id, user.email);
-          // You can add sign-in tracking logic here if needed
-        }
+        await this.processUserUpdate(user, oldUser);
       }
 
       res.status(200).json({ success: true, message: 'User updated webhook processed successfully' });
@@ -238,7 +210,7 @@ class WebhookController {
     }
   });
 
-  // Handle Omise payment webhook
+  // Handle Omise payment
   handleOmisePayment = asyncHandler(async (req, res) => {
     try {
       console.log('Webhook: Omise payment event received');
@@ -255,7 +227,7 @@ class WebhookController {
           return res.status(401).json({ error: 'Missing webhook signature' });
         }
 
-        // Verify signature
+        // Verify webhook signature
         const expectedSignature = crypto
           .createHmac('sha256', webhookSecret)
           .update(JSON.stringify(req.body))
@@ -267,7 +239,7 @@ class WebhookController {
         }
       }
 
-      // Handle different payment events
+      // Handle different payment types
       if (type === 'charge.complete' || type === 'charge.successful') {
         await this.handleSuccessfulPayment(data);
       } else if (type === 'charge.failed') {
@@ -291,7 +263,7 @@ class WebhookController {
     try {
       console.log('Processing successful payment:', chargeData.id);
 
-      // Find the payment record
+      // Find the payment
       const payment = await this.prisma.payment.findFirst({
         where: {
           omise_charge_id: chargeData.id
@@ -318,7 +290,7 @@ class WebhookController {
         }
       });
 
-      // Create subscription
+      // Create new subscription
       const subscription = await this.prisma.subscription.create({
         data: {
           member_id: payment.member_id,
@@ -334,8 +306,7 @@ class WebhookController {
 
       console.log('Subscription created successfully:', subscription.subscription_id);
 
-      // Send confirmation email (optional)
-      // await this.sendPaymentConfirmationEmail(payment, subscription);
+      // Send confirmation email
 
     } catch (error) {
       console.error('Error handling successful payment:', error);
@@ -348,7 +319,7 @@ class WebhookController {
     try {
       console.log('Processing failed payment:', chargeData.id);
 
-      // Find the payment record
+      // Find the payment
       const payment = await this.prisma.payment.findFirst({
         where: {
           omise_charge_id: chargeData.id
@@ -383,7 +354,7 @@ class WebhookController {
     try {
       console.log('Processing expired payment:', chargeData.id);
 
-      // Find the payment record
+      // Find the payment
       const payment = await this.prisma.payment.findFirst({
         where: {
           omise_charge_id: chargeData.id

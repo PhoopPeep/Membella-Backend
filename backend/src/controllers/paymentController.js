@@ -43,6 +43,121 @@ class PaymentController {
     }
   });
 
+  // Helper: Handle payment error
+  handlePaymentError(error, res) {
+    console.error('PaymentController subscription payment error:', error);
+    console.error('Error stack:', error.stack);
+    
+    let statusCode = 500;
+    let message = 'Payment processing failed';
+
+    if (error.message.includes('Plan not found')) {
+      statusCode = 404;
+      message = 'The selected plan is no longer available';
+    } else if (error.message.includes('Member not found') || error.message.includes('Authentication') || error.message.includes('Unauthorized')) {
+      statusCode = 401;
+      message = 'Authentication required';
+    } else if (error.message.includes('already have an active subscription')) {
+      statusCode = 409;
+      message = 'You already have an active subscription to this plan';
+    } else if (error.message.includes('Insufficient funds')) {
+      statusCode = 402;
+      message = error.message;
+    } else if (error.message.includes('Invalid card') || error.message.includes('card details') ||
+               error.message.includes('expired') || error.message.includes('stolen') || 
+               error.message.includes('amount') || error.message.includes('minimum') || 
+               error.message.includes('PromptPay')) {
+      statusCode = 400;
+      message = error.message;
+    }
+
+    console.error('Sending error response:', { statusCode, message });
+
+    res.status(statusCode).json({
+      success: false,
+      message,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+
+  // Helper: Validate authentication
+  validateAuthentication(req, res) {
+    if (!req.user || !req.user.userId) {
+      console.error('Authentication failed: No user data in request');
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required. Please log in to continue.'
+      });
+      return false;
+    }
+
+    if (req.user.role !== 'member') {
+      console.error('Authorization failed: User role is not member:', req.user.role);
+      res.status(403).json({
+        success: false,
+        message: 'Member access required.'
+      });
+      return false;
+    }
+
+    return true;
+  }
+
+  // Helper: Validate payment data
+  validatePaymentData(planId, paymentMethod, paymentSource, customerData, res) {
+    if (!planId || typeof planId !== 'string' || planId.trim() === '') {
+      console.error('Validation failed: Invalid planId:', planId);
+      res.status(400).json({
+        success: false,
+        message: 'Plan ID is required'
+      });
+      return false;
+    }
+
+    if (!paymentMethod || !['card', 'promptpay'].includes(paymentMethod)) {
+      console.error('Validation failed: Invalid paymentMethod:', paymentMethod);
+      res.status(400).json({
+        success: false,
+        message: 'Valid payment method is required (card or promptpay)'
+      });
+      return false;
+    }
+
+    return true;
+  }
+
+  // Helper: Validate card payment
+  validateCardPayment(paymentSource, customerData, res) {
+    if (!paymentSource || typeof paymentSource !== 'string' || paymentSource.trim() === '') {
+      console.error('Validation failed: Missing paymentSource for card payment');
+      res.status(400).json({
+        success: false,
+        message: 'Payment source token is required for card payments'
+      });
+      return false;
+    }
+
+    if (!paymentSource.startsWith('tokn_')) {
+      console.error('Validation failed: Invalid token format:', paymentSource.substring(0, 10));
+      res.status(400).json({
+        success: false,
+        message: 'Invalid payment token format'
+      });
+      return false;
+    }
+
+    if (customerData?.name && (typeof customerData.name !== 'string' || customerData.name.trim() === '')) {
+      console.error('Validation failed: Invalid customer name');
+      res.status(400).json({
+        success: false,
+        message: 'Valid cardholder name is required for card payments'
+      });
+      return false;
+    }
+
+    return true;
+  }
+
   // Create subscription payment
   createSubscriptionPayment = asyncHandler(async (req, res) => {
     try {
@@ -61,54 +176,17 @@ class PaymentController {
         role: req.user?.role
       });
       
+      // Authentication check
+      if (!this.validateAuthentication(req, res)) return;
+      
       const memberId = req.user.userId;
       const { planId, paymentMethod, paymentSource, customerData } = req.body;
 
-      // Validation
-      if (!planId || typeof planId !== 'string' || planId.trim() === '') {
-        console.error('Validation failed: Invalid planId:', planId);
-        return res.status(400).json({
-          success: false,
-          message: 'Plan ID is required'
-        });
-      }
+      // Validate payment data
+      if (!this.validatePaymentData(planId, paymentMethod, paymentSource, customerData, res)) return;
 
-      if (!paymentMethod || !['card', 'promptpay'].includes(paymentMethod)) {
-        console.error('Validation failed: Invalid paymentMethod:', paymentMethod);
-        return res.status(400).json({
-          success: false,
-          message: 'Valid payment method is required (card or promptpay)'
-        });
-      }
-
-      // Card-specific validation
-      if (paymentMethod === 'card') {
-        if (!paymentSource || typeof paymentSource !== 'string' || paymentSource.trim() === '') {
-          console.error('Validation failed: Missing paymentSource for card payment');
-          return res.status(400).json({
-            success: false,
-            message: 'Payment source token is required for card payments'
-          });
-        }
-
-        // Validate token format
-        if (!paymentSource.startsWith('tokn_')) {
-          console.error('Validation failed: Invalid token format:', paymentSource.substring(0, 10));
-          return res.status(400).json({
-            success: false,
-            message: 'Invalid payment token format'
-          });
-        }
-
-        // Validate customer data for card payments
-        if (customerData?.name && (typeof customerData.name !== 'string' || customerData.name.trim() === '')) {
-          console.error('Validation failed: Invalid customer name');
-          return res.status(400).json({
-            success: false,
-            message: 'Valid cardholder name is required for card payments'
-          });
-        }
-      }
+      // Validate card payment if needed
+      if (paymentMethod === 'card' && !this.validateCardPayment(paymentSource, customerData, res)) return;
 
       console.log('Validation passed. Processing subscription payment:', { 
         memberId, 
@@ -116,7 +194,7 @@ class PaymentController {
         paymentMethod 
       });
 
-      // Process payment through service
+      // Process payment
       const result = await this.paymentService.processSubscriptionPayment({
         memberId,
         planId: planId.trim(),
@@ -142,7 +220,7 @@ class PaymentController {
       console.error('PaymentController subscription payment error:', error);
       console.error('Error stack:', error.stack);
       
-      // Handle specific error types
+      // Handle error types
       let statusCode = 500;
       let message = 'Payment processing failed';
 
@@ -155,19 +233,13 @@ class PaymentController {
       } else if (error.message.includes('already have an active subscription')) {
         statusCode = 409;
         message = 'You already have an active subscription to this plan';
-      } else if (error.message.includes('Invalid card') || error.message.includes('card details')) {
-        statusCode = 400;
-        message = error.message;
       } else if (error.message.includes('Insufficient funds')) {
         statusCode = 402;
         message = error.message;
-      } else if (error.message.includes('expired') || error.message.includes('stolen')) {
-        statusCode = 400;
-        message = error.message;
-      } else if (error.message.includes('amount') || error.message.includes('minimum')) {
-        statusCode = 400;
-        message = error.message;
-      } else if (error.message.includes('PromptPay')) {
+      } else if (error.message.includes('Invalid card') || error.message.includes('card details') ||
+                 error.message.includes('expired') || error.message.includes('stolen') || 
+                 error.message.includes('amount') || error.message.includes('minimum') || 
+                 error.message.includes('PromptPay')) {
         statusCode = 400;
         message = error.message;
       }
@@ -200,10 +272,10 @@ class PaymentController {
 
       console.log('Getting payment status:', paymentId);
 
-      // Get payment from service with full details
+      // Get payment with full details
       const payment = await this.paymentService.getPaymentStatus(paymentId.trim());
 
-      // Verify payment belongs to the requesting member
+      // Verify payment belongs to the member
       if (payment.member_id !== memberId) {
         return res.status(403).json({
           success: false,
@@ -232,7 +304,7 @@ class PaymentController {
       const responseData = {
         id: payment.payment_id,
         status: payment.status,
-        amount: parseFloat(payment.amount.toString()),
+        amount: Number.parseFloat(payment.amount.toString()),
         currency: payment.currency,
         paymentMethod: payment.payment_method,
         description: payment.description,
@@ -284,8 +356,8 @@ class PaymentController {
       console.log('Getting payment history for member:', memberId);
 
       // Validate query parameters
-      const limitNum = Math.min(parseInt(limit) || 50, 100); // Max 100 per request
-      const offsetNum = Math.max(parseInt(offset) || 0, 0);
+      const limitNum = Math.min(Number.parseInt(limit) || 50, 100); // Max 100 per request
+      const offsetNum = Math.max(Number.parseInt(offset) || 0, 0);
 
       if (status && !['pending', 'successful', 'failed', 'expired', 'refunded'].includes(status)) {
         return res.status(400).json({
@@ -493,7 +565,7 @@ class PaymentController {
       }
 
       // Validate maxAttempts
-      const maxAttemptsNum = Math.min(Math.max(parseInt(maxAttempts) || 60, 1), 300); // 1-300 attempts
+      const maxAttemptsNum = Math.min(Math.max(Number.parseInt(maxAttempts) || 60, 1), 300); // 1-300 attempts
 
       console.log('Starting payment status polling:', paymentId, 'max attempts:', maxAttemptsNum);
 
@@ -586,47 +658,57 @@ class PaymentController {
     }
   });
 
+  // Helper: Validate plan and method
+  validatePlanAndMethod(planId, paymentMethod, errors) {
+    if (!planId || typeof planId !== 'string' || planId.trim() === '') {
+      errors.push('Valid plan ID is required');
+    }
+
+    if (!paymentMethod || !['card', 'promptpay'].includes(paymentMethod)) {
+      errors.push('Valid payment method is required (card or promptpay)');
+    }
+  }
+
+  // Helper: Validate payment source
+  validatePaymentSource(paymentMethod, paymentSource, errors) {
+    if (paymentMethod === 'card') {
+      if (!paymentSource || typeof paymentSource !== 'string') {
+        errors.push('Payment source token is required for card payments');
+      } else if (!paymentSource.startsWith('tokn_')) {
+        errors.push('Invalid payment token format');
+      }
+    }
+  }
+
+  // Helper: Validate amount
+  validatePaymentAmount(amount, paymentMethod, errors) {
+    if (amount === undefined) return;
+
+    const numAmount = Number.parseFloat(amount);
+    if (Number.isNaN(numAmount) || numAmount <= 0) {
+      errors.push('Amount must be a positive number');
+      return;
+    }
+
+    const amountInSatang = Math.round(numAmount * 100);
+    
+    if (paymentMethod === 'card' && amountInSatang < 100) {
+      errors.push('Card payment minimum is 1 THB');
+    } else if (paymentMethod === 'promptpay' && amountInSatang < 2000) {
+      errors.push('PromptPay minimum is 20 THB');
+    }
+  }
+
   // Validate payment before processing
   validatePayment = asyncHandler(async (req, res) => {
     try {
       const { planId, paymentMethod, amount, paymentSource } = req.body;
-
       const errors = [];
 
-      // Validate plan ID
-      if (!planId || typeof planId !== 'string' || planId.trim() === '') {
-        errors.push('Valid plan ID is required');
-      }
-
-      // Validate payment method
-      if (!paymentMethod || !['card', 'promptpay'].includes(paymentMethod)) {
-        errors.push('Valid payment method is required (card or promptpay)');
-      }
-
-      // Validate payment source for card payments
-      if (paymentMethod === 'card') {
-        if (!paymentSource || typeof paymentSource !== 'string') {
-          errors.push('Payment source token is required for card payments');
-        } else if (!paymentSource.startsWith('tokn_')) {
-          errors.push('Invalid payment token format');
-        }
-      }
-
-      // Validate amount
-      if (amount !== undefined) {
-        const numAmount = parseFloat(amount);
-        if (isNaN(numAmount) || numAmount <= 0) {
-          errors.push('Amount must be a positive number');
-        } else {
-          const amountInSatang = Math.round(numAmount * 100);
-          
-          if (paymentMethod === 'card' && amountInSatang < 100) {
-            errors.push('Card payment minimum is 1 THB');
-          } else if (paymentMethod === 'promptpay' && amountInSatang < 2000) {
-            errors.push('PromptPay minimum is 20 THB');
-          }
-        }
-      }
+      // Run validations
+      this.validatePlanAndMethod(planId, paymentMethod, errors);
+      this.validatePaymentSource(paymentMethod, paymentSource, errors);
+      this.validatePaymentAmount(amount, paymentMethod, errors);
 
       if (errors.length > 0) {
         return res.status(400).json({
@@ -687,9 +769,9 @@ class PaymentController {
           updated: payment.status !== updatedPayment.status,
           lastChecked: new Date().toISOString()
         },
-        message: payment.status !== updatedPayment.status 
-          ? `Payment status updated from ${payment.status} to ${updatedPayment.status}`
-          : 'Payment status unchanged'
+        message: payment.status === updatedPayment.status
+          ? 'Payment status unchanged'
+          : `Payment status updated from ${payment.status} to ${updatedPayment.status}`
       });
 
     } catch (error) {
@@ -726,7 +808,7 @@ class PaymentController {
       }
 
       const { limit = 50 } = req.query;
-      const limitNum = Math.min(parseInt(limit) || 50, 100);
+      const limitNum = Math.min(Number.parseInt(limit) || 50, 100);
 
       // Return a placeholder response
       const mockLogs = [

@@ -195,9 +195,10 @@ class AuthController {
       }
 
       // Check if user is verified
-      // Note: When user clicks verification link, Supabase automatically confirms the email
-      // and redirects back with valid tokens. The email_confirmed_at should be set.
-      if (!user.email_confirmed_at) {
+      // When user clicks verification link, Supabase automatically confirms the email and redirects back with valid tokens. The email_confirmed_at should be set.
+      if (user.email_confirmed_at) {
+        console.log('Email confirmed for user:', user.id, 'at:', user.email_confirmed_at);
+      } else {
         console.log('Email not confirmed for user:', user.id);
         console.log('User data:', {
           id: user.id,
@@ -206,11 +207,8 @@ class AuthController {
           created_at: user.created_at
         });
         
-        // For email verification callback, we should still proceed if we have valid tokens
-        // because the verification process should have completed successfully
+        // For email verification callback, we should still proceed if we have valid tokens because the verification process should have completed successfully
         console.log('Proceeding with auth callback despite email_confirmed_at being null - this might be a timing issue');
-      } else {
-        console.log('Email confirmed for user:', user.id, 'at:', user.email_confirmed_at);
       }
 
       // Get user from database
@@ -235,17 +233,14 @@ class AuthController {
         });
       }
 
-      // For email verification callback, we trust that if we have valid tokens,
-      // the email verification process has completed successfully
-      // This is because Supabase only provides valid tokens after successful verification
-      if (!user.email_confirmed_at) {
+      // For email verification callback, we trust that if we have valid tokens, the email verification process has completed successfully
+      if (user.email_confirmed_at) {
+        console.log('Email confirmed for user:', user.id, 'at:', user.email_confirmed_at);
+      } else {
         console.log('Email confirmation status not available, but proceeding with valid tokens');
         console.log('This indicates the email verification process completed successfully');
         
-        // Since we have valid tokens from Supabase, we can proceed
-        // The email verification was successful even if the field is not immediately updated
-      } else {
-        console.log('Email confirmed for user:', user.id, 'at:', user.email_confirmed_at);
+        // Since we have valid tokens from Supabase, we can proceed. The email verification was successful even if the field is not immediately updated
       }
 
       // Generate JWT token
@@ -348,7 +343,7 @@ class AuthController {
     try {
       const { access_token, password } = req.body;
       
-      console.log('🔧 Reset password request received:', {
+      console.log('Reset password request received:', {
         hasAccessToken: !!access_token,
         hasPassword: !!password,
         passwordLength: password ? password.length : 0
@@ -356,7 +351,7 @@ class AuthController {
       
       // Validation (additional check after middleware)
       if (!access_token || !password) {
-        console.log('🔧 Validation failed: Missing token or password');
+        console.log('Validation failed: Missing token or password');
         return res.status(400).json({
           success: false,
           message: 'Reset token and new password are required',
@@ -365,7 +360,7 @@ class AuthController {
       }
 
       if (password.length < 8) {
-        console.log('🔧 Validation failed: Password too short');
+        console.log('Validation failed: Password too short');
         return res.status(400).json({
           success: false,
           message: 'Password must be at least 8 characters long',
@@ -373,7 +368,7 @@ class AuthController {
         });
       }
       
-      console.log('🔧 Calling authService.resetPassword...');
+      console.log('Calling authService.resetPassword...');
       const result = await this.authService.resetPassword(access_token, password);
       
       if (result.success) {

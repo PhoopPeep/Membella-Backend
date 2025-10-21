@@ -10,7 +10,6 @@ const profileController = new ProfileController();
 
 console.log('Profile Routes Module Loaded');
 
-// Configure multer for file uploads
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -25,7 +24,7 @@ const upload = multer({
   }
 });
 
-// Debug middleware
+// Request logging middleware for debugging
 router.use((req, res, next) => {
   console.log('Profile Router Hit:', {
     method: req.method,
@@ -36,7 +35,7 @@ router.use((req, res, next) => {
   next();
 });
 
-// All profile routes require authentication
+// Authentication middleware
 router.use(authenticateToken);
 
 router.get('/profile', apiRateLimiter, authenticateTokenOrSupabase, (req, res, next) => {

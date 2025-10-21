@@ -63,7 +63,7 @@ class SubscriptionController {
           planName: subscription.plan.name,
           planDescription: subscription.plan.description,
           organization: subscription.plan.owner.org_name,
-          price: parseFloat(subscription.plan.price.toString()),
+          price: Number.parseFloat(subscription.plan.price.toString()),
           duration: subscription.plan.duration,
           status: subscription.status,
           startDate: subscription.start_date,
@@ -79,7 +79,7 @@ class SubscriptionController {
               description: pf.feature.description
             })),
           payment: {
-            amount: parseFloat(subscription.payment.amount.toString()),
+            amount: Number.parseFloat(subscription.payment.amount.toString()),
             currency: subscription.payment.currency,
             method: subscription.payment.payment_method,
             paidAt: subscription.payment.create_at
@@ -179,7 +179,7 @@ class SubscriptionController {
         planDescription: subscription.plan.description,
         organization: subscription.plan.owner.org_name,
         organizationContact: subscription.plan.owner.contact_info,
-        price: parseFloat(subscription.plan.price.toString()),
+        price: Number.parseFloat(subscription.plan.price.toString()),
         duration: subscription.plan.duration,
         status: subscription.status,
         startDate: subscription.start_date,
@@ -196,7 +196,7 @@ class SubscriptionController {
           })),
         payment: {
           id: subscription.payment.payment_id,
-          amount: parseFloat(subscription.payment.amount.toString()),
+          amount: Number.parseFloat(subscription.payment.amount.toString()),
           currency: subscription.payment.currency,
           method: subscription.payment.payment_method,
           status: subscription.payment.status,
@@ -283,7 +283,7 @@ class SubscriptionController {
         activeSubscriptions,
         expiredSubscriptions,
         cancelledSubscriptions: stats.find(s => s.status === 'cancelled')?._count.status || 0,
-        totalSpent: parseFloat(totalSpent._sum.amount?.toString() || '0'),
+        totalSpent: Number.parseFloat(totalSpent._sum.amount?.toString() || '0'),
         currency: 'THB'
       };
 

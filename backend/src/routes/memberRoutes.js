@@ -6,14 +6,14 @@ const { authenticateToken } = require('../middleware/auth');
 const router = express.Router();
 const memberController = new MemberController();
 
-// Public routes (no authentication required)
+// Public routes
 router.get('/owners', apiRateLimiter, memberController.getOwners);
 
-// Owner specific routes (public)
+// Owner specific routes
 router.get('/owners/:ownerId/plans', apiRateLimiter, memberController.getOwnerPlans);
 router.get('/plans/:planId', apiRateLimiter, memberController.getPlanDetails);
 
-// Protected routes (authentication required)
+// Protected routes
 router.get('/members', authenticateToken, apiRateLimiter, memberController.getMembers);
 router.get('/plan-stats', authenticateToken, apiRateLimiter, memberController.getPlanStats);
 router.delete('/members/:memberId', authenticateToken, apiRateLimiter, memberController.deleteMember);

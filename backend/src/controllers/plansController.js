@@ -27,7 +27,7 @@ class PlansController {
       id: plan.plan_id,
       name: plan.name,
       description: plan.description,
-      price: parseFloat(plan.price.toString()),
+      price: Number.parseFloat(plan.price.toString()),
       duration: plan.duration,
       features: plan.plan_features.map(pf => pf.feature_id),
       createdAt: plan.create_at,
@@ -64,7 +64,7 @@ class PlansController {
       id: plan.plan_id,
       name: plan.name,
       description: plan.description,
-      price: parseFloat(plan.price.toString()),
+      price: Number.parseFloat(plan.price.toString()),
       duration: plan.duration,
       features: plan.plan_features.map(pf => pf.feature_id),
       createdAt: plan.create_at,
@@ -88,8 +88,8 @@ class PlansController {
         data: {
           name: name.trim(),
           description: description.trim(),
-          price: parseFloat(price),
-          duration: parseInt(duration),
+          price: Number.parseFloat(price),
+          duration: Number.parseInt(duration),
           owner_id: req.user.userId
         }
       });
@@ -126,7 +126,7 @@ class PlansController {
       id: result.plan_id,
       name: result.name,
       description: result.description,
-      price: parseFloat(result.price.toString()),
+      price: Number.parseFloat(result.price.toString()),
       duration: result.duration,
       features: features,
       createdAt: result.create_at,
@@ -170,8 +170,8 @@ class PlansController {
         data: {
           name: name.trim(),
           description: description.trim(),
-          price: parseFloat(price),
-          duration: parseInt(duration),
+          price: Number.parseFloat(price),
+          duration: Number.parseInt(duration),
           update_at: new Date()
         }
       });
@@ -215,7 +215,7 @@ class PlansController {
       id: result.plan_id,
       name: result.name,
       description: result.description,
-      price: parseFloat(result.price.toString()),
+      price: Number.parseFloat(result.price.toString()),
       duration: result.duration,
       features: features,
       createdAt: result.create_at,

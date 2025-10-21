@@ -87,7 +87,7 @@ class ProfileController {
   getProfile = asyncHandler(async (req, res) => {
     let userId;
     
-    // Check if we have a JWT token (normal auth) or Supabase token (direct auth)
+    // Check if we have a JWT token or Supabase token
     if (req.user && req.user.userId) {
       // Normal JWT authentication
       userId = req.user.userId;
@@ -126,7 +126,7 @@ class ProfileController {
   updateProfile = asyncHandler(async (req, res) => {
     let userId;
     
-    // Check if we have a JWT token (normal auth) or Supabase token (direct auth)
+    // Check if we have a JWT token or Supabase token
     if (req.user && req.user.userId) {
       // Normal JWT authentication
       userId = req.user.userId;
@@ -138,7 +138,7 @@ class ProfileController {
     }
     const { org_name, email, description, contact_info } = req.body;
     
-    // Check if user exists
+    // Check if owner exists
     const existingUser = await prisma.owner.findUnique({
       where: { owner_id: userId }
     });
@@ -147,22 +147,21 @@ class ProfileController {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // Email cannot be changed for security reasons
+    // Email cannot be changed
     if (email && email !== existingUser.email) {
       return res.status(400).json({ message: 'Email address cannot be changed for security reasons' });
     }
 
-    // Prepare update data (exclude email)
+    // Prepare update data
     const updateData = {
       update_at: new Date()
     };
 
     if (org_name !== undefined) updateData.org_name = org_name.trim();
-    // Email is intentionally excluded from updates
     if (description !== undefined) updateData.description = description?.trim() || null;
     if (contact_info !== undefined) updateData.contact_info = contact_info;
     
-    // Update user in database
+    // Update owner in database
     const updatedUser = await prisma.owner.update({
       where: { owner_id: userId },
       data: updateData,
@@ -196,7 +195,7 @@ class ProfileController {
       return res.status(400).json({ message: 'New password must be at least 6 characters long' });
     }
 
-    // Check if user exists
+    // Check if owner exists
     const user = await prisma.owner.findUnique({
       where: { owner_id: userId }
     });
@@ -242,7 +241,7 @@ class ProfileController {
   uploadAvatar = asyncHandler(async (req, res) => {
     const userId = req.user.userId;
 
-    // Check if user exists
+    // Check if owner exists
     const user = await prisma.owner.findUnique({
       where: { owner_id: userId }
     });
@@ -304,7 +303,7 @@ class ProfileController {
   removeAvatar = asyncHandler(async (req, res) => {
     const userId = req.user.userId;
 
-    // Check if user exists
+    // Check if owner exists
     const user = await prisma.owner.findUnique({
       where: { owner_id: userId }
     });

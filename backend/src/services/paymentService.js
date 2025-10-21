@@ -6,9 +6,27 @@ const prisma = getPrismaClient();
 
 class PaymentService {
   constructor() {
-    // Cache for recent webhook processing to prevent duplicates
     this.recentWebhooks = new Map();
     this.webhookCacheTimeout = 300000; // 5 minutes
+  }
+
+  // Helper: Validate card charge amount
+  validateCardAmount(amount) {
+    const amountInSatang = Math.round(amount * 100);
+    if (amountInSatang <= 0) {
+      throw new Error('Invalid amount: must be greater than 0');
+    }
+    if (amountInSatang < 100) {
+      throw new Error('Invalid amount: minimum payment is 1 THB');
+    }
+    return amountInSatang;
+  }
+
+  // Helper: Validate card token
+  validateCardToken(token) {
+    if (!token || typeof token !== 'string' || !token.startsWith('tokn_')) {
+      throw new Error('Invalid card token provided');
+    }
   }
 
   // Create a card payment charge
@@ -26,18 +44,8 @@ class PaymentService {
     try {
       console.log('Creating Omise card charge:', { amount, currency, description, hasToken: !!token });
 
-      const amountInSatang = Math.round(amount * 100);
-      if (amountInSatang <= 0) {
-        throw new Error('Invalid amount: must be greater than 0');
-      }
-
-      if (amountInSatang < 100) {
-        throw new Error('Invalid amount: minimum payment is 1 THB');
-      }
-
-      if (!token || typeof token !== 'string' || !token.startsWith('tokn_')) {
-        throw new Error('Invalid card token provided');
-      }
+      const amountInSatang = this.validateCardAmount(amount);
+      this.validateCardToken(token);
 
       const charge = await omise.charges.create({
         amount: amountInSatang,
@@ -109,21 +117,155 @@ class PaymentService {
     }
   }
 
-  // Create PromptPay payment using Omise best practices
+  // Helper: Validate PromptPay amount
+  validatePromptPayAmount(amount) {
+    const amountInSatang = Math.round(amount * 100);
+    if (amountInSatang <= 0 || amountInSatang < 2000) {
+      throw new Error('Invalid amount: minimum payment for PromptPay is 20 THB');
+    }
+    return amountInSatang;
+  }
+
+  // Helper: Extract QR code from charge source
+  extractQRFromChargeSource(charge) {
+    let qrCodeUrl = null;
+    let expiresAt = null;
+    let sourceId = null;
+
+    if (charge.source) {
+      sourceId = charge.source.id;
+      console.log('Charge source details:', {
+        id: charge.source.id,
+        type: charge.source.type,
+        has_scannable_code: !!charge.source.scannable_code,
+        scannable_code_type: charge.source.scannable_code?.type
+      });
+
+      if (charge.source.scannable_code && charge.source.scannable_code.image) {
+        qrCodeUrl = charge.source.scannable_code.image.download_uri;
+        console.log('QR code found in charge source:', qrCodeUrl);
+      }
+
+      if (charge.source.expires_at) {
+        expiresAt = charge.source.expires_at;
+      }
+    }
+
+    return { qrCodeUrl, expiresAt, sourceId };
+  }
+
+  // Helper: Retrieve QR code from Omise source
+  async retrieveQRFromSource(sourceId) {
+    try {
+      console.log('Retrieving source separately...');
+      const source = await omise.sources.retrieve(sourceId);
+      console.log('Retrieved source:', {
+        id: source.id,
+        type: source.type,
+        has_scannable_code: !!source.scannable_code,
+        scannable_code_type: source.scannable_code?.type
+      });
+
+      let qrCodeUrl = null;
+      let expiresAt = null;
+
+      if (source.scannable_code && source.scannable_code.image) {
+        qrCodeUrl = source.scannable_code.image.download_uri;
+        console.log('QR code found in retrieved source:', qrCodeUrl);
+      }
+
+      if (source.expires_at) {
+        expiresAt = source.expires_at;
+      }
+
+      return { qrCodeUrl, expiresAt };
+    } catch (retrieveError) {
+      console.error('Failed to retrieve source:', retrieveError);
+      return { qrCodeUrl: null, expiresAt: null };
+    }
+  }
+
+  // Helper: Create fallback QR code
+  createFallbackQRCode(amountInSatang, chargeId, sourceId) {
+    try {
+      console.warn('Creating fallback QR code');
+      const qrData = {
+        type: 'promptpay',
+        amount: amountInSatang,
+        currency: 'THB',
+        charge_id: chargeId,
+        source_id: sourceId
+      };
+      
+      const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(JSON.stringify(qrData))}`;
+      console.log('Fallback QR code created:', qrCodeUrl);
+      return qrCodeUrl;
+    } catch (fallbackError) {
+      console.error('Failed to create fallback QR code:', fallbackError);
+      return null;
+    }
+  }
+
+  // Helper: Process QR code for PromptPay
+  async processPromptPayQRCode(charge, amountInSatang) {
+    let { qrCodeUrl, expiresAt, sourceId } = this.extractQRFromChargeSource(charge);
+
+    if (!qrCodeUrl && sourceId) {
+      const retrieved = await this.retrieveQRFromSource(sourceId);
+      qrCodeUrl = retrieved.qrCodeUrl;
+      expiresAt = retrieved.expiresAt || expiresAt;
+    }
+
+    if (!qrCodeUrl) {
+      qrCodeUrl = this.createFallbackQRCode(amountInSatang, charge.id, sourceId);
+    }
+
+    console.log('QR code URL generated:', qrCodeUrl ? 'Yes' : 'No');
+    return { qrCodeUrl, expiresAt };
+  }
+
+  // Helper: Handle PromptPay errors
+  handlePromptPayError(error) {
+    console.error('PromptPay charge creation failed:', error);
+    
+    if (error.response) {
+      console.error('Omise API Error Response:', {
+        status: error.response.status,
+        data: error.response.data,
+        headers: error.response.headers
+      });
+    }
+    
+    if (error.code) {
+      console.error('Omise Error Code:', error.code);
+    }
+
+    if (error.message?.includes('amount')) {
+      throw new Error('Invalid payment amount. PromptPay requires minimum 20 THB.');
+    }
+    
+    if (error.message?.includes('currency')) {
+      throw new Error('PromptPay only supports THB currency.');
+    }
+
+    if (error.message?.includes('type')) {
+      throw new Error('PromptPay payment method is not available.');
+    }
+
+    throw new Error(`PromptPay payment failed: ${error.message}`);
+  }
+
+  // Create PromptPay payment
   async createPromptPayCharge(paymentData) {
     const { amount, description, customerId, metadata = {} } = paymentData;
 
     try {
       console.log('Creating PromptPay charge:', { amount, description });
 
-      const amountInSatang = Math.round(amount * 100);
-      if (amountInSatang <= 0 || amountInSatang < 2000) {
-        throw new Error('Invalid amount: minimum payment for PromptPay is 20 THB');
-      }
-
+      const amountInSatang = this.validatePromptPayAmount(amount);
       console.log('Amount in satang:', amountInSatang);
 
-      // Create charge directly with PromptPay source (Omise best practice)
+      // Create charge directly with PromptPay source
       const charge = await omise.charges.create({
         amount: amountInSatang,
         currency: 'THB',
@@ -131,7 +273,7 @@ class PaymentService {
         source: {
           type: 'promptpay'
         },
-        capture: false, // Don't capture immediately for PromptPay
+        capture: false,
         metadata: {
           ...metadata,
           customer_id: customerId,
@@ -153,78 +295,8 @@ class PaymentService {
         throw new Error('Failed to create PromptPay charge');
       }
 
-      let qrCodeUrl = null;
-      let expiresAt = null;
-      let sourceId = null;
-
-      // Get QR code from charge source
-      if (charge.source) {
-        sourceId = charge.source.id;
-        console.log('Charge source details:', {
-          id: charge.source.id,
-          type: charge.source.type,
-          has_scannable_code: !!charge.source.scannable_code,
-          scannable_code_type: charge.source.scannable_code?.type
-        });
-
-        if (charge.source.scannable_code && charge.source.scannable_code.image) {
-          qrCodeUrl = charge.source.scannable_code.image.download_uri;
-          console.log('QR code found in charge source:', qrCodeUrl);
-        }
-
-        if (charge.source.expires_at) {
-          expiresAt = charge.source.expires_at;
-        }
-      }
-
-      // If no QR code found, try to retrieve the source separately
-      if (!qrCodeUrl && sourceId) {
-        console.log('No QR code in charge, retrieving source separately...');
-        try {
-          const source = await omise.sources.retrieve(sourceId);
-          console.log('Retrieved source:', {
-            id: source.id,
-            type: source.type,
-            has_scannable_code: !!source.scannable_code,
-            scannable_code_type: source.scannable_code?.type
-          });
-
-          if (source.scannable_code && source.scannable_code.image) {
-            qrCodeUrl = source.scannable_code.image.download_uri;
-            console.log('QR code found in retrieved source:', qrCodeUrl);
-          }
-
-          if (source.expires_at) {
-            expiresAt = source.expires_at;
-          }
-        } catch (retrieveError) {
-          console.error('Failed to retrieve source:', retrieveError);
-        }
-      }
-
-      // If still no QR code, create a fallback QR code
-      if (!qrCodeUrl) {
-        console.warn('Omise did not provide QR code, creating fallback QR code');
-        try {
-          // Create a QR code with payment information
-          const qrData = {
-            type: 'promptpay',
-            amount: amountInSatang,
-            currency: 'THB',
-            charge_id: charge.id,
-            source_id: sourceId
-          };
-          
-          // Use QR code generation service
-          qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(JSON.stringify(qrData))}`;
-          console.log('Fallback QR code created:', qrCodeUrl);
-        } catch (fallbackError) {
-          console.error('Failed to create fallback QR code:', fallbackError);
-          // Don't throw error, just log it and continue without QR code
-        }
-      }
-
-      console.log('QR code URL generated:', qrCodeUrl ? 'Yes' : 'No');
+      // Process QR code
+      const { qrCodeUrl, expiresAt } = await this.processPromptPayQRCode(charge, amountInSatang);
 
       return {
         charge,
@@ -233,34 +305,94 @@ class PaymentService {
         expires_at: expiresAt
       };
     } catch (error) {
-      console.error('PromptPay charge creation failed:', error);
-      
-      if (error.response) {
-        console.error('Omise API Error Response:', {
-          status: error.response.status,
-          data: error.response.data,
-          headers: error.response.headers
-        });
-      }
-      
-      if (error.code) {
-        console.error('Omise Error Code:', error.code);
-      }
-
-      if (error.message && error.message.includes('amount')) {
-        throw new Error('Invalid payment amount. PromptPay requires minimum 20 THB.');
-      }
-      
-      if (error.message && error.message.includes('currency')) {
-        throw new Error('PromptPay only supports THB currency.');
-      }
-
-      if (error.message && error.message.includes('type')) {
-        throw new Error('PromptPay payment method is not available.');
-      }
-
-      throw new Error(`PromptPay payment failed: ${error.message}`);
+      this.handlePromptPayError(error);
     }
+  }
+
+  // Helper: Create charge based on payment method
+  async createChargeForPayment(paymentMethod, paymentSource, amount, description, memberId, paymentRecordId, planId) {
+    if (paymentMethod === 'promptpay') {
+      return await this.createPromptPayCharge({
+        amount,
+        description,
+        customerId: memberId,
+        metadata: {
+          payment_id: paymentRecordId,
+          plan_id: planId,
+          member_id: memberId
+        }
+      });
+    } else if (paymentMethod === 'card') {
+      if (!paymentSource) {
+        throw new Error('Payment source token is required for card payments');
+      }
+      
+      return await this.createCardCharge({
+        amount,
+        currency: 'THB',
+        description,
+        token: paymentSource,
+        customerId: memberId,
+        metadata: {
+          payment_id: paymentRecordId,
+          plan_id: planId,
+          member_id: memberId
+        },
+        capture: true
+      });
+    } else {
+      throw new Error('Unsupported payment method');
+    }
+  }
+
+  // Helper: Update payment with charge result
+  async updatePaymentWithCharge(tx, paymentRecordId, chargeResult, paymentMethod) {
+    const updateData = {
+      omise_charge_id: chargeResult.charge?.id || chargeResult.id,
+      status: this.mapOmiseStatusToLocal(chargeResult.charge?.status || chargeResult.status),
+      omise_response: chargeResult.charge || chargeResult,
+      update_at: new Date()
+    };
+
+    if (paymentMethod === 'promptpay' && chargeResult.source) {
+      updateData.omise_source_id = chargeResult.source.id;
+    }
+
+    await tx.payment.update({
+      where: { payment_id: paymentRecordId },
+      data: updateData
+    });
+
+    return updateData;
+  }
+
+  // Helper: Check if payment is successful
+  isPaymentSuccessful(chargeResult, paymentMethod) {
+    const finalStatus = chargeResult.charge?.status || chargeResult.status;
+    if (paymentMethod === 'card') {
+      return chargeResult.charge?.paid || (chargeResult.charge?.authorized && chargeResult.charge?.captured);
+    }
+    return finalStatus === 'successful';
+  }
+
+  // Helper: Build payment response
+  buildPaymentResponse(paymentRecordId, chargeResult, amount, paymentMethod, isSuccessful) {
+    const finalStatus = chargeResult.charge?.status || chargeResult.status;
+    const response = {
+      success: true,
+      paymentId: paymentRecordId,
+      chargeId: chargeResult.charge?.id || chargeResult.id,
+      amount,
+      currency: 'THB',
+      status: paymentMethod === 'card' && isSuccessful ? 'successful' : finalStatus
+    };
+
+    if (paymentMethod === 'promptpay') {
+      response.qr_code_url = chargeResult.qr_code_url;
+      response.expires_at = chargeResult.expires_at;
+    }
+
+    return response;
   }
 
   // Process subscription payment with error handling
@@ -310,7 +442,7 @@ class PaymentService {
         throw new Error('You already have an active subscription to this plan');
       }
 
-      const amount = parseFloat(plan.price.toString());
+      const amount = Number.parseFloat(plan.price.toString());
       
       if (paymentMethod === 'promptpay' && amount < 20) {
         throw new Error('PromptPay requires minimum payment of 20 THB');
@@ -347,59 +479,19 @@ class PaymentService {
         let chargeResult;
 
         try {
-          if (paymentMethod === 'promptpay') {
-            chargeResult = await this.createPromptPayCharge({
-              amount,
-              description,
-              customerId: memberId,
-              metadata: {
-                payment_id: paymentRecord.payment_id,
-                plan_id: planId,
-                member_id: memberId
-              }
-            });
-          } else if (paymentMethod === 'card') {
-            if (!paymentSource) {
-              throw new Error('Payment source token is required for card payments');
-            }
-            
-            chargeResult = await this.createCardCharge({
-              amount,
-              currency: 'THB',
-              description,
-              token: paymentSource,
-              customerId: memberId,
-              metadata: {
-                payment_id: paymentRecord.payment_id,
-                plan_id: planId,
-                member_id: memberId
-              },
-              capture: true
-            });
-          } else {
-            throw new Error('Unsupported payment method');
-          }
+          chargeResult = await this.createChargeForPayment(
+            paymentMethod,
+            paymentSource,
+            amount,
+            description,
+            memberId,
+            paymentRecord.payment_id,
+            planId
+          );
 
-          const updateData = {
-            omise_charge_id: chargeResult.charge?.id || chargeResult.id,
-            status: this.mapOmiseStatusToLocal(chargeResult.charge?.status || chargeResult.status),
-            omise_response: chargeResult.charge || chargeResult,
-            update_at: new Date()
-          };
+          await this.updatePaymentWithCharge(tx, paymentRecord.payment_id, chargeResult, paymentMethod);
 
-          if (paymentMethod === 'promptpay' && chargeResult.source) {
-            updateData.omise_source_id = chargeResult.source.id;
-          }
-
-          await tx.payment.update({
-            where: { payment_id: paymentRecord.payment_id },
-            data: updateData
-          });
-
-          const finalStatus = chargeResult.charge?.status || chargeResult.status;
-          const isSuccessful = paymentMethod === 'card' ? 
-            (chargeResult.charge?.paid || (chargeResult.charge?.authorized && chargeResult.charge?.captured)) :
-            finalStatus === 'successful';
+          const isSuccessful = this.isPaymentSuccessful(chargeResult, paymentMethod);
 
           if (isSuccessful) {
             if (paymentMethod === 'card') {
@@ -417,21 +509,7 @@ class PaymentService {
 
           console.log('Subscription payment processed:', paymentRecord.payment_id);
 
-          const response = {
-            success: true,
-            paymentId: paymentRecord.payment_id,
-            chargeId: chargeResult.charge?.id || chargeResult.id,
-            amount,
-            currency: 'THB',
-            status: paymentMethod === 'card' && isSuccessful ? 'successful' : finalStatus
-          };
-
-          if (paymentMethod === 'promptpay') {
-            response.qr_code_url = chargeResult.qr_code_url;
-            response.expires_at = chargeResult.expires_at;
-          }
-
-          return response;
+          return this.buildPaymentResponse(paymentRecord.payment_id, chargeResult, amount, paymentMethod, isSuccessful);
 
         } catch (chargeError) {
           console.error('Charge creation error:', chargeError);
@@ -653,6 +731,98 @@ class PaymentService {
   }
 
   // Polling with Omise integration
+  // Helper: Build payment status response
+  buildPaymentStatusResponse(payment, attempts) {
+    return {
+      id: payment.payment_id,
+      status: payment.status,
+      amount: Number.parseFloat(payment.amount.toString()),
+      currency: payment.currency,
+      paymentMethod: payment.payment_method,
+      planName: payment.plan?.name,
+      organization: payment.plan?.owner?.org_name,
+      attempts,
+      lastChecked: new Date().toISOString()
+    };
+  }
+
+  // Helper: Check payment with Omise API
+  async checkPaymentWithOmise(paymentId, payment, attempts) {
+    try {
+      console.log('Checking with Omise API on attempt:', attempts);
+      await this.refreshPaymentFromOmise(paymentId);
+      const refreshedPayment = await this.getPaymentStatus(paymentId);
+      
+      if (refreshedPayment.status !== payment.status) {
+        console.log('Status updated from Omise:', payment.status, '->', refreshedPayment.status);
+        return refreshedPayment;
+      }
+      return null;
+    } catch (omiseError) {
+      console.warn('Failed to check Omise API on attempt', attempts, ':', omiseError.message);
+      return null;
+    }
+  }
+
+  // Helper: Check if payment is in final state
+  isPaymentInFinalState(payment) {
+    return payment.status === 'successful' || payment.status === 'failed' || payment.status === 'expired';
+  }
+
+  // Helper: Resolve successful payment
+  resolveSuccessfulPayment(payment, attempts, resolve) {
+    console.log('Payment successful, stopping polling');
+    resolve(this.buildPaymentStatusResponse(payment, attempts));
+  }
+
+  // Helper: Reject failed payment
+  rejectFailedPayment(payment, reject) {
+    console.log(`Payment ${payment.status}, stopping polling`);
+    reject(new Error(`Payment ${payment.status}`));
+  }
+
+  // Helper: Check payment status and decide action
+  handlePaymentStatus(payment, attempts, maxAttempts, resolve, reject, pollInterval, poll) {
+    if (payment.status === 'successful') {
+      this.resolveSuccessfulPayment(payment, attempts, resolve);
+      return true;
+    }
+    
+    if (payment.status === 'failed' || payment.status === 'expired') {
+      this.rejectFailedPayment(payment, reject);
+      return true;
+    }
+    
+    if (attempts >= maxAttempts) {
+      console.log('Polling timeout reached');
+      reject(new Error('Payment verification timeout. Please check your payment status manually.'));
+      return true;
+    }
+    
+    console.log(`Payment still ${payment.status}, continuing to poll... (${attempts}/${maxAttempts})`);
+    setTimeout(poll, pollInterval);
+    return false;
+  }
+
+  // Helper: Process Omise refresh check
+  async processOmiseRefresh(paymentId, payment, attempts) {
+    const refreshedPayment = await this.checkPaymentWithOmise(paymentId, payment, attempts);
+    
+    if (!refreshedPayment) {
+      return { payment, shouldContinue: false, resolved: false };
+    }
+
+    if (refreshedPayment.status === 'successful') {
+      return { payment: refreshedPayment, shouldContinue: false, resolved: true, response: this.buildPaymentStatusResponse(refreshedPayment, attempts) };
+    }
+    
+    if (refreshedPayment.status === 'failed' || refreshedPayment.status === 'expired') {
+      return { payment: refreshedPayment, shouldContinue: false, resolved: false, error: new Error(`Payment ${refreshedPayment.status}`) };
+    }
+    
+    return { payment: refreshedPayment, shouldContinue: true, resolved: false };
+  }
+
   async pollPaymentStatusEnhanced(paymentId, maxAttempts = 60) {
     let attempts = 0;
     const pollInterval = 3000; // 3 seconds
@@ -663,82 +833,39 @@ class PaymentService {
           attempts++;
           console.log(`Enhanced polling attempt ${attempts}/${maxAttempts} for payment: ${paymentId}`);
 
-          // Get payment from database
-          const payment = await this.getPaymentStatus(paymentId);
+          let payment = await this.getPaymentStatus(paymentId);
           
-          // Every 5th attempt, also check with Omise API for the latest status
+          // Every 5th attempt, check with Omise API
           if (payment.omise_charge_id && (attempts % 5 === 0 || attempts === 1)) {
-            try {
-              console.log('Checking with Omise API on attempt:', attempts);
-              await this.refreshPaymentFromOmise(paymentId);
-              // Get updated payment after refresh
-              const refreshedPayment = await this.getPaymentStatus(paymentId);
-              
-              if (refreshedPayment.status !== payment.status) {
-                console.log('Status updated from Omise:', payment.status, '->', refreshedPayment.status);
-                
-                // If successful, resolve immediately
-                if (refreshedPayment.status === 'successful') {
-                  return resolve({
-                    id: refreshedPayment.payment_id,
-                    status: refreshedPayment.status,
-                    amount: parseFloat(refreshedPayment.amount.toString()),
-                    currency: refreshedPayment.currency,
-                    paymentMethod: refreshedPayment.payment_method,
-                    planName: refreshedPayment.plan?.name,
-                    organization: refreshedPayment.plan?.owner?.org_name,
-                    attempts,
-                    lastChecked: new Date().toISOString()
-                  });
-                }
-                
-                // If failed or expired, reject
-                if (refreshedPayment.status === 'failed' || refreshedPayment.status === 'expired') {
-                  return reject(new Error(`Payment ${refreshedPayment.status}`));
-                }
-              }
-            } catch (omiseError) {
-              console.warn('Failed to check Omise API on attempt', attempts, ':', omiseError.message);
+            const result = await this.processOmiseRefresh(paymentId, payment, attempts);
+            
+            if (result.resolved) {
+              return resolve(result.response);
+            }
+            
+            if (result.error) {
+              return reject(result.error);
+            }
+            
+            if (result.shouldContinue) {
+              payment = result.payment;
             }
           }
           
-          // Check current status
-          if (payment.status === 'successful') {
-            console.log('Payment successful, stopping polling');
-            resolve({
-              id: payment.payment_id,
-              status: payment.status,
-              amount: parseFloat(payment.amount.toString()),
-              currency: payment.currency,
-              paymentMethod: payment.payment_method,
-              planName: payment.plan?.name,
-              organization: payment.plan?.owner?.org_name,
-              attempts,
-              lastChecked: new Date().toISOString()
-            });
-          } else if (payment.status === 'failed' || payment.status === 'expired') {
-            console.log(`Payment ${payment.status}, stopping polling`);
-            reject(new Error(`Payment ${payment.status}`));
-          } else if (attempts >= maxAttempts) {
-            console.log('Polling timeout reached');
-            reject(new Error('Payment verification timeout. Please check your payment status manually.'));
-          } else {
-            console.log(`Payment still ${payment.status}, continuing to poll... (${attempts}/${maxAttempts})`);
-            setTimeout(poll, pollInterval);
-          }
+          // Check current status and decide action
+          this.handlePaymentStatus(payment, attempts, maxAttempts, resolve, reject, pollInterval, poll);
+          
         } catch (error) {
           console.error(`Enhanced polling attempt ${attempts} failed:`, error);
 
           if (attempts >= maxAttempts) {
             reject(error);
           } else {
-            // Retry after interval on error
             setTimeout(poll, pollInterval);
           }
         }
       };
 
-      // Start polling immediately
       poll();
     });
   }
@@ -899,7 +1026,7 @@ class PaymentService {
         id: payment.payment_id,
         planName: payment.plan.name,
         organization: payment.plan.owner.org_name,
-        amount: parseFloat(payment.amount.toString()),
+        amount: Number.parseFloat(payment.amount.toString()),
         currency: payment.currency,
         paymentMethod: payment.payment_method,
         status: payment.status,
@@ -989,12 +1116,12 @@ class PaymentService {
 
       return {
         totalPayments,
-        totalSuccessfulAmount: parseFloat(totalAmount._sum.amount?.toString() || '0'),
+        totalSuccessfulAmount: Number.parseFloat(totalAmount._sum.amount?.toString() || '0'),
         breakdown: stats.map(stat => ({
           status: stat.status,
           paymentMethod: stat.payment_method,
           count: stat._count.payment_id,
-          totalAmount: parseFloat(stat._sum.amount?.toString() || '0')
+          totalAmount: Number.parseFloat(stat._sum.amount?.toString() || '0')
         }))
       };
     } catch (error) {

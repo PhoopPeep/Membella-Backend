@@ -1,11 +1,9 @@
 const { supabase } = require('../config/supabase')
 const { v4: uuidv4 } = require('uuid')
-const path = require('path')
+const path = require('node:path')
 
 class SupabaseStorageService {
-  constructor() {
-    this.bucketName = 'profiles'
-  }
+  bucketName = 'profiles'
 
   /**
    * Upload profile image to Supabase Storage

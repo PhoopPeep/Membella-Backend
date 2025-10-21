@@ -87,7 +87,7 @@ class DashboardController {
     });
 
     const totalRevenue = subscriptions.reduce((sum, subscription) => {
-      return sum + parseFloat(subscription.plan.price.toString());
+      return sum + Number.parseFloat(subscription.plan.price.toString());
     }, 0);
 
     // Calculate revenue for this month
@@ -110,7 +110,7 @@ class DashboardController {
     });
 
     const revenueThisMonth = thisMonthSubscriptions.reduce((sum, subscription) => {
-      return sum + parseFloat(subscription.plan.price.toString());
+      return sum + Number.parseFloat(subscription.plan.price.toString());
     }, 0);
 
     // Calculate revenue for last month
@@ -134,7 +134,7 @@ class DashboardController {
     });
 
     const revenueLastMonth = lastMonthSubscriptions.reduce((sum, subscription) => {
-      return sum + parseFloat(subscription.plan.price.toString());
+      return sum + Number.parseFloat(subscription.plan.price.toString());
     }, 0);
 
     // Get new plans this month
@@ -149,9 +149,12 @@ class DashboardController {
     });
 
     // Calculate growth percentage
-    const growthPercentage = revenueLastMonth > 0 
-      ? Math.round(((revenueThisMonth - revenueLastMonth) / revenueLastMonth) * 100)
-      : revenueThisMonth > 0 ? 100 : 0;
+    let growthPercentage = 0;
+    if (revenueLastMonth > 0) {
+      growthPercentage = Math.round(((revenueThisMonth - revenueLastMonth) / revenueLastMonth) * 100);
+    } else if (revenueThisMonth > 0) {
+      growthPercentage = 100;
+    }
 
     const stats = {
       totalRevenue,
@@ -239,7 +242,7 @@ class DashboardController {
           status: sub.status,
           startDate: sub.start_date,
           endDate: sub.end_date,
-          price: parseFloat(sub.plan.price.toString())
+          price: Number.parseFloat(sub.plan.price.toString())
         }))
       };
     });
@@ -337,10 +340,9 @@ class DashboardController {
 
     // Transform the data to match frontend expectations
     const transformedMembers = members.map(member => {
-      const activeSubscription = member.subscriptions.find(sub => sub.status === 'active');
       const allPayments = member.payments.map(payment => ({
         id: payment.payment_id,
-        amount: parseFloat(payment.amount.toString()),
+        amount: Number.parseFloat(payment.amount.toString()),
         status: payment.status,
         planName: payment.plan.name,
         createdAt: payment.create_at
@@ -367,12 +369,12 @@ class DashboardController {
     res.json(transformedMembers);
   });
 
-  // Delete a member
+  // Delete a member (remove from owner's plans)
   deleteMember = asyncHandler(async (req, res) => {
     const ownerId = req.user.userId;
     const { memberId } = req.params;
 
-    console.log('Deleting member:', memberId, 'for owner:', ownerId);
+    console.log('Removing member from owner plans:', memberId, 'for owner:', ownerId);
 
     // First, verify that the member belongs to this owner's plans
     const member = await prisma.member.findFirst({
@@ -399,12 +401,24 @@ class DashboardController {
 
     if (!member) {
       return res.status(404).json({ 
+        success: false,
         message: 'Member not found or does not belong to your plans' 
       });
     }
 
-    // Delete member's subscriptions first (cascade delete)
-    await prisma.subscription.deleteMany({
+    // Check if member has any active subscriptions
+    const hasActiveSubscription = member.subscriptions.some(sub => sub.status === 'active');
+
+    if (hasActiveSubscription) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot remove member with active subscription',
+        detail: 'Member still has an active subscription. Please wait for the subscription to expire or cancel it first.'
+      });
+    }
+
+    // Delete member's payments related to this owner
+    const deletedPayments = await prisma.payment.deleteMany({
       where: {
         member_id: memberId,
         plan: {
@@ -413,31 +427,32 @@ class DashboardController {
       }
     });
 
-    // Delete member's payments
-    await prisma.payment.deleteMany({
+    // Delete member's subscriptions related to this owner (only non-active ones)
+    const deletedSubscriptions = await prisma.subscription.deleteMany({
       where: {
         member_id: memberId,
         plan: {
           owner_id: ownerId
+        },
+        status: {
+          not: 'active'
         }
       }
     });
 
-    // Finally, delete the member
-    await prisma.member.delete({
-      where: {
-        member_id: memberId
-      }
-    });
-
-    console.log(`Member ${memberId} deleted successfully`);
+    console.log(`Member ${memberId} removed from owner's plans. Deleted ${deletedSubscriptions.count} subscriptions and ${deletedPayments.count} payments`);
 
     res.json({ 
-      message: 'Member deleted successfully',
-      deletedMember: {
+      success: true,
+      message: 'Member removed from your plans successfully',
+      removedMember: {
         id: member.member_id,
         email: member.email,
         fullName: member.full_name
+      },
+      deletedRecords: {
+        subscriptions: deletedSubscriptions.count,
+        payments: deletedPayments.count
       }
     });
   });
@@ -464,7 +479,7 @@ class DashboardController {
     });
 
     return subscriptions.reduce((sum, subscription) => {
-      return sum + parseFloat(subscription.plan.price.toString());
+      return sum + Number.parseFloat(subscription.plan.price.toString());
     }, 0);
   }
 
@@ -513,4 +528,5 @@ class DashboardController {
   }
 }
 
+module.exports = DashboardController;
 module.exports = DashboardController;

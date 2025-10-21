@@ -6,7 +6,7 @@ const { apiRateLimiter } = require('../middleware/rateLimiter');
 const router = express.Router();
 const paymentController = new PaymentController();
 
-// Rate limiters for different types of operations
+// Rate limiters
 const paymentRateLimiter = require('express-rate-limit')({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10, // 10 payment attempts per 15 minutes
@@ -42,7 +42,6 @@ const webhookRateLimiter = require('express-rate-limit')({
   standardHeaders: false,
   legacyHeaders: false,
   skip: (req) => {
-    // Skip rate limiting for localhost in development
     if (process.env.NODE_ENV === 'development') {
       return req.ip === '127.0.0.1' || req.ip === '::1';
     }
@@ -50,7 +49,7 @@ const webhookRateLimiter = require('express-rate-limit')({
   }
 });
 
-// Add request logging middleware for debugging
+// Request logging middleware for debugging
 if (process.env.NODE_ENV === 'development') {
   router.use((req, res, next) => {
     console.log('=== Payment Route Debug ===');
@@ -107,6 +106,34 @@ if (process.env.NODE_ENV === 'development') {
 // All routes
 router.use(requireMember);
 
+router.use((req, res, next) => {
+  console.log('Payment route authentication check:', {
+    hasUser: !!req.user,
+    userId: req.user?.userId,
+    role: req.user?.role,
+    path: req.path,
+    method: req.method
+  });
+  
+  if (!req.user || !req.user.userId) {
+    console.error('Payment route: No user data found');
+    return res.status(401).json({
+      success: false,
+      message: 'Authentication required. Please log in to continue.'
+    });
+  }
+  
+  if (req.user.role !== 'member') {
+    console.error('Payment route: Invalid user role:', req.user.role);
+    return res.status(403).json({
+      success: false,
+      message: 'Member access required.'
+    });
+  }
+  
+  next();
+});
+
 // Payment creation and processing
 router.post('/subscription', paymentRateLimiter, paymentController.createSubscriptionPayment);
 
@@ -123,7 +150,7 @@ router.get('/poll/:paymentId', apiRateLimiter, paymentController.pollPaymentStat
 // Validation endpoint
 router.post('/validate', apiRateLimiter, paymentController.validatePayment);
 
-// Add middleware to track API usage for monitoring
+// Track API usage for monitoring
 router.use((req, res, next) => {
   // Track payment API usage
   const startTime = Date.now();
@@ -158,7 +185,7 @@ router.use((req, res, next) => {
 });
 
 // Error handling middleware specifically for payment routes
-router.use((error, req, res, next) => {
+router.use((error, req, res, _next) => {
   console.error('Payment Route Error:', {
     error: error.message,
     stack: error.stack,

@@ -12,13 +12,13 @@ router.use(express.json({ limit: '10mb' }));
 // Health check endpoint
 router.get('/health', webhookController.webhookHealthCheck);
 
-// Database webhook endpoints (user creation only)
+// Database webhook endpoints
 router.post('/user-created', webhookController.handleUserCreated);
 
-// Legacy endpoints (for backward compatibility)
+// Legacy endpoints
 router.post('/email-verification', webhookController.handleEmailVerification);
 
-// Omise payment webhook endpoints
+// Omise payment webhook
 router.post('/omise-payment', webhookController.handleOmisePayment);
 
 module.exports = router;

@@ -21,6 +21,7 @@ model Owner {
   // Relations
   features    Feature[]
   plans       Plan[]
+  api_keys    ApiKey[]
   
   @@map("owners")
 }
@@ -136,4 +137,23 @@ model Subscription {
   payment Payment @relation(fields: [payment_id], references: [payment_id], onDelete: Cascade)
   
   @@map("subscriptions")
+}
+
+model ApiKey {
+  api_key_id    String    @id @default(uuid())
+  owner_id      String
+  name          String    // ชื่อที่ owner ตั้งให้ API key
+  description   String?   // คำอธิบายเพิ่มเติม
+  key_value     String    @unique // API key ที่ generate ออกมา
+  permissions   String[]  @default(["features:read"]) // permissions array
+  is_active     Boolean   @default(true)
+  last_used_at  DateTime?
+  expires_at    DateTime? // null = never expires
+  create_at     DateTime  @default(now())
+  update_at     DateTime  @default(now())
+  
+  // Relations
+  owner Owner @relation(fields: [owner_id], references: [owner_id], onDelete: Cascade)
+  
+  @@map("api_keys")
 }

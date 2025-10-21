@@ -1,6 +1,5 @@
 const jwt = require('jsonwebtoken');
 const { supabase } = require('../config/supabase');
-const { AuthenticationError } = require('../utils/errorHandler');
 
 const JWT_SECRET = process.env.JWT_SECRET
 
@@ -13,7 +12,7 @@ async function authenticateTokenOrSupabase(req, res, next) {
   }
   
   try {
-    // First try JWT token (normal authentication)
+    // Try JWT token
     try {
       const user = jwt.verify(token, JWT_SECRET);
       req.user = user;
@@ -22,7 +21,7 @@ async function authenticateTokenOrSupabase(req, res, next) {
     } catch (jwtError) {
       console.log('JWT verification failed, trying Supabase token...', jwtError.message);
       
-      // If JWT fails, try Supabase token
+      // Try Authentication
       const { data: { user }, error } = await supabase.auth.getUser(token);
       
       if (error || !user) {
@@ -30,7 +29,7 @@ async function authenticateTokenOrSupabase(req, res, next) {
         return res.status(403).json({ message: 'Invalid or expired token.' });
       }
       
-      // Set user data for Supabase token
+      // Set user data for Authentication (Supabase)
       req.user = {
         id: user.id,
         email: user.email,

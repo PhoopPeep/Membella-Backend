@@ -1,14 +1,12 @@
 const express = require('express');
 const { requireOwner } = require('../middleware/roleAuth');
 
-// Import existing controllers
 const DashboardController = require('../controllers/dashboardController');
 const FeaturesController = require('../controllers/featuresController');
 const PlansController = require('../controllers/plansController');
 
 const router = express.Router();
 
-// All owner routes require owner authentication
 router.use(requireOwner);
 
 // Dashboard routes

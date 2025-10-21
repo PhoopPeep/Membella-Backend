@@ -39,7 +39,7 @@ router.post('/forgot-password', authRateLimiter, validateForgotPassword, authCon
 router.post('/reset-password', authRateLimiter, validateResetPassword, authController.resetPassword);
 router.post('/verify-reset-token', authRateLimiter, validateResetToken, authController.verifyResetToken);
 
-// Profile routes (for compatibility with frontend)
+// Profile routes
 router.get('/profile', authenticateToken, profileController.getProfile);
 router.put('/profile', authenticateToken, profileController.updateProfile);
 router.put('/change-password', authenticateToken, profileController.changePassword);

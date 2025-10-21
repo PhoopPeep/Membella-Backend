@@ -7,7 +7,7 @@ const { validateFeature } = require('../middleware/validation');
 const router = express.Router();
 const featuresController = new FeaturesController();
 
-router.use(requireOwner); // All feature routes require owner authentication
+router.use(requireOwner);
 
 router.get('/', apiRateLimiter, featuresController.getFeatures);
 router.get('/:id', apiRateLimiter, featuresController.getFeatureById);

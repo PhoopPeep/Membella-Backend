@@ -1,13 +1,114 @@
 const { getPrismaClient } = require('../config/database');
 const { supabase, supabaseAnon } = require('../config/supabase');
 const jwt = require('jsonwebtoken');
-const { ValidationError, AuthenticationError, ConflictError, AppError, NotFoundError } = require('../utils/errorHandler');
+const { ValidationError, AuthenticationError, NotFoundError } = require('../utils/errorHandler');
 
 class MemberAuthService {
   constructor() {
     this.prisma = getPrismaClient();
     this.supabase = supabase;
-    this.jwtSecret = process.env.JWT_SECRET || '65YHSNjVcJ9q4V2GGGlxvQ1hmGt2x344Po8CYi+U9aD5mdiMJlGMXLHF7YyC5Q5ZTCKWOeWfMYXkqDBG4SxSFw==';
+    this.jwtSecret = process.env.JWT_SECRET;
+  }
+
+  // Helper: Validate member registration data
+  validateRegistrationData(userData) {
+    if (!userData.fullName?.trim()) {
+      throw new ValidationError('Full name is required');
+    }
+    if (!userData.email?.trim()) {
+      throw new ValidationError('Email is required');
+    }
+    if (!userData.password?.trim()) {
+      throw new ValidationError('Password is required');
+    }
+    if (userData.password.length < 8) {
+      throw new ValidationError('Password must be at least 8 characters long');
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(userData.email.trim())) {
+      throw new ValidationError('Please enter a valid email address');
+    }
+  }
+
+  // Helper: Handle Supabase auth errors
+  handleSupabaseAuthError(authError) {
+    if (authError.message.includes('rate limit') || authError.message.includes('Email rate limit exceeded')) {
+      return {
+        success: false,
+        message: 'Email sending limit reached. Please wait 1 hour and try again.',
+        requiresVerification: false,
+        rateLimited: true,
+        emailError: false
+      };
+    }
+
+    if (authError.message.includes('already registered')) {
+      return {
+        success: false,
+        message: 'This email is already registered. Please try logging in instead.',
+        requiresVerification: false,
+        rateLimited: false,
+        emailError: true
+      };
+    }
+
+    return {
+      success: false,
+      message: authError.message || 'Registration failed. Please try again.',
+      requiresVerification: false,
+      rateLimited: false,
+      emailError: false
+    };
+  }
+
+  // Helper: Create member in database
+  async createMemberInDatabase(authData, userData) {
+    try {
+      const newMember = await this.prisma.member.create({
+        data: {
+          member_id: authData.user.id,
+          email: userData.email.toLowerCase().trim(),
+          full_name: userData.fullName.trim(),
+          password: '' // Password is managed by Supabase
+        }
+      });
+
+      console.log('Member created in database:', newMember.member_id);
+
+      return {
+        success: true,
+        message: 'Registration successful! Please check your email (including spam folder) to verify your account. The verification email was sent from noreply@mail.supabase.io',
+        member: {
+          member_id: newMember.member_id,
+          email: newMember.email,
+          full_name: newMember.full_name,
+          create_at: newMember.create_at,
+          update_at: newMember.update_at
+        },
+        requiresVerification: true,
+        rateLimited: false,
+        emailError: false,
+        supabaseUser: authData.user
+      };
+    } catch (dbError) {
+      console.error('Database error during member registration:', dbError);
+      
+      try {
+        await this.supabase.auth.admin.deleteUser(authData.user.id);
+        console.log('Cleaned up Supabase user after database error');
+      } catch (cleanupError) {
+        console.error('Failed to cleanup Supabase user:', cleanupError);
+      }
+      
+      return {
+        success: false,
+        message: 'Registration failed. Please try again.',
+        requiresVerification: false,
+        rateLimited: false,
+        emailError: false
+      };
+    }
   }
 
   async register(userData) {
@@ -15,24 +116,7 @@ class MemberAuthService {
       console.log('MemberAuthService: Starting member registration for:', userData.email);
 
       // Validate input
-      if (!userData.fullName?.trim()) {
-        throw new ValidationError('Full name is required');
-      }
-      if (!userData.email?.trim()) {
-        throw new ValidationError('Email is required');
-      }
-      if (!userData.password?.trim()) {
-        throw new ValidationError('Password is required');
-      }
-      if (userData.password.length < 8) {
-        throw new ValidationError('Password must be at least 8 characters long');
-      }
-
-      // Email format validation
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(userData.email.trim())) {
-        throw new ValidationError('Please enter a valid email address');
-      }
+      this.validateRegistrationData(userData);
 
       // Check if member already exists
       const existingMember = await this.prisma.member.findUnique({
@@ -54,7 +138,7 @@ class MemberAuthService {
         email: userData.email.toLowerCase().trim(),
         password: userData.password,
         options: {
-          emailRedirectTo: `${process.env.MEMBER_FRONTEND_URL || 'http://localhost:5174'}/auth/callback`,
+          emailRedirectTo: `${process.env.MEMBER_FRONTEND_URL}/auth/callback`,
           data: {
             full_name: userData.fullName,
             phone: userData.phone,
@@ -71,84 +155,11 @@ class MemberAuthService {
 
       if (authError) {
         console.error('Supabase member auth error:', authError);
-        
-        if (authError.message.includes('rate limit') || authError.message.includes('Email rate limit exceeded')) {
-          return {
-            success: false,
-            message: 'Email sending limit reached. Please wait 1 hour and try again.',
-            requiresVerification: false,
-            rateLimited: true,
-            emailError: false
-          };
-        }
-
-        if (authError.message.includes('already registered')) {
-          return {
-            success: false,
-            message: 'This email is already registered. Please try logging in instead.',
-            requiresVerification: false,
-            rateLimited: false,
-            emailError: true
-          };
-        }
-
-        return {
-          success: false,
-          message: authError.message || 'Registration failed. Please try again.',
-          requiresVerification: false,
-          rateLimited: false,
-          emailError: false
-        };
+        return this.handleSupabaseAuthError(authError);
       }
 
       if (authData.user) {
-        try {
-          // Create member in database
-          const newMember = await this.prisma.member.create({
-            data: {
-              member_id: authData.user.id,
-              email: userData.email.toLowerCase().trim(),
-              full_name: userData.fullName.trim(),
-              password: '' // Password is managed by Supabase
-            }
-          });
-
-          console.log('Member created in database:', newMember.member_id);
-
-          return {
-            success: true,
-            message: 'Registration successful! Please check your email (including spam folder) to verify your account. The verification email was sent from noreply@mail.supabase.io',
-            member: {
-              member_id: newMember.member_id,
-              email: newMember.email,
-              full_name: newMember.full_name,
-              create_at: newMember.create_at,
-              update_at: newMember.update_at
-            },
-            requiresVerification: true,
-            rateLimited: false,
-            emailError: false,
-            supabaseUser: authData.user
-          };
-        } catch (dbError) {
-          console.error('Database error during member registration:', dbError);
-          
-          // Cleanup: Delete Supabase user if database creation fails
-          try {
-            await this.supabase.auth.admin.deleteUser(authData.user.id);
-            console.log('Cleaned up Supabase user after database error');
-          } catch (cleanupError) {
-            console.error('Failed to cleanup Supabase user:', cleanupError);
-          }
-          
-          return {
-            success: false,
-            message: 'Registration failed due to database error. Please try again.',
-            requiresVerification: false,
-            rateLimited: false,
-            emailError: false
-          };
-        }
+        return await this.createMemberInDatabase(authData, userData);
       }
 
       return {
@@ -274,7 +285,7 @@ class MemberAuthService {
           role: 'member'
         },
         this.jwtSecret,
-        { expiresIn: '7d' }
+        { expiresIn: '1d' }
       );
 
       console.log('Member login successful:', member.member_id);
@@ -316,7 +327,7 @@ class MemberAuthService {
         type: 'signup',
         email: email.toLowerCase().trim(),
         options: {
-          emailRedirectTo: `${process.env.MEMBER_FRONTEND_URL || 'http://localhost:5174'}/auth/callback`
+          emailRedirectTo: `${process.env.MEMBER_FRONTEND_URL}/auth/callback`
         }
       });
 
@@ -362,7 +373,7 @@ class MemberAuthService {
     }
   }
 
-  // Change Password for Member
+  // Change password for member
   async changePassword(memberId, currentPassword, newPassword) {
     try {
       console.log('MemberAuthService: Changing password for member:', memberId);
@@ -376,7 +387,7 @@ class MemberAuthService {
         throw new ValidationError('New password must be at least 8 characters long');
       }
 
-      // Get member from database
+      // Get member from local database
       const member = await this.prisma.member.findUnique({
         where: { member_id: memberId }
       });
@@ -386,7 +397,7 @@ class MemberAuthService {
       }
 
       try {
-        // First verify current password with Supabase
+        // Verify current password with Supabase
         const { error: signInError } = await this.supabase.auth.signInWithPassword({
           email: member.email,
           password: currentPassword
@@ -433,7 +444,7 @@ class MemberAuthService {
           };
         }
 
-        // Update timestamp in database
+        // Update timestamp in local database
         await this.prisma.member.update({
           where: { member_id: memberId },
           data: { update_at: new Date() }
@@ -479,7 +490,7 @@ class MemberAuthService {
     return jwt.sign(
       { userId, email, role: 'member' },
       this.jwtSecret,
-      { expiresIn: '7d' }
+      { expiresIn: '1d' }
     );
   }
 
@@ -487,11 +498,12 @@ class MemberAuthService {
     try {
       return jwt.verify(token, this.jwtSecret);
     } catch (error) {
+      console.error('JWT verification failed:', error.message);
       throw new AuthenticationError('Invalid or expired token');
     }
   }
 
-  // Forgot password - send email with reset link
+  // Send email with reset link
   async forgotPassword(email) {
     try {
       console.log('Sending member password reset email to:', email);
@@ -514,7 +526,7 @@ class MemberAuthService {
       const { data, error } = await this.supabase.auth.resetPasswordForEmail(
         email.toLowerCase().trim(),
         {
-          redirectTo: `${process.env.MEMBER_FRONTEND_URL || 'http://localhost:5174'}/reset-password`
+          redirectTo: `${process.env.MEMBER_FRONTEND_URL}/reset-password`
 
         }
       );

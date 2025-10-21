@@ -15,6 +15,7 @@ const {
 // Import routes
 const authRoutes = require('./routes/authRoutes');
 const featureRoutes = require('./routes/featureRoutes');
+const apiGatewayFeaturesRoutes = require('./routes/apiGatewayFeatures');
 const planRoutes = require('./routes/planRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const profileRoutes = require('./routes/profileRoutes');
@@ -62,10 +63,10 @@ class App {
           process.env.MEMBER_FRONTEND_URL
         ];
         
-        // Allow requests with no origin (like mobile apps or curl requests)
+        // Allow requests with no origin
         if (!origin) return callback(null, true);
         
-        if (allowedOrigins.indexOf(origin) !== -1) {
+        if (allowedOrigins.includes(origin)) {
           callback(null, true);
         } else {
           logger.warn({
@@ -141,7 +142,7 @@ class App {
 
     // Body size limit
     this.app.use((req, res, next) => {
-      const contentLength = parseInt(req.headers['content-length'] || '0');
+      const contentLength = Number.parseInt(req.headers['content-length'] || '0');
       const maxSize = 10 * 1024 * 1024; // 10MB
       
       if (contentLength > maxSize) {
@@ -161,11 +162,11 @@ class App {
     // Sanitize request body
     this.app.use((req, res, next) => {
       if (req.body) {
-        Object.keys(req.body).forEach(key => {
+        for (const key of Object.keys(req.body)) {
           if (typeof req.body[key] === 'string') {
-            req.body[key] = req.body[key].trim().replace(/\s+/g, ' ');
+            req.body[key] = req.body[key].trim().replaceAll(/\s+/g, ' ');
           }
-        });
+        }
       }
       next();
     });
@@ -229,24 +230,26 @@ class App {
     // Import member auth routes
     const memberAuthRoutes = require('./routes/memberAuthRoutes');
     const webhookRoutes = require('./routes/webhookRoutes');
+    const apiKeyRoutes = require('./routes/apiKeyRoutes');
+    const autoKeyGenerationRoutes = require('./routes/autoKeyGenerationRoutes');
     
     // Verification routes removed - no longer needed
   
     // API routes
     this.app.use('/api/auth', authRoutes);
     this.app.use('/api/member/auth', memberAuthRoutes);
-    this.app.use('/api/features', featureRoutes);
+    this.app.use('/api/gateway/features', apiGatewayFeaturesRoutes); // API Gateway routes
+    this.app.use('/api/features', featureRoutes); // Regular features routes
     this.app.use('/api/plans', planRoutes);
     this.app.use('/api/dashboard', dashboardRoutes);
     this.app.use('/api/profile', profileRoutes);
     this.app.use('/api/owner', ownerRouts);
     this.app.use('/api/member', memberRoutes);
+    this.app.use('/api/api-keys', apiKeyRoutes);
+    this.app.use('/api/auto-generate-keys', autoKeyGenerationRoutes);
     
     // Webhook routes
     this.app.use('/api/webhooks', webhookRoutes);
-    
-    
-    // Verification routes removed - no longer needed
     
     // Payment and Subscription routes
     this.app.use('/api/payments', paymentRoutes);
@@ -256,23 +259,23 @@ class App {
       this.app.get('/api/debug/routes', (req, res) => {
         const routes = [];
         
-        this.app._router.stack.forEach((middleware) => {
+        for (const middleware of this.app._router.stack) {
           if (middleware.route) {
             routes.push({
               path: middleware.route.path,
               methods: Object.keys(middleware.route.methods)
             });
           } else if (middleware.name === 'router') {
-            middleware.handle.stack.forEach((handler) => {
+            for (const handler of middleware.handle.stack) {
               if (handler.route) {
                 routes.push({
                   path: middleware.regexp.source + handler.route.path,
                   methods: Object.keys(handler.route.methods)
                 });
               }
-            });
+            }
           }
-        });
+        }
         
         res.json({ registeredRoutes: routes });
       });
@@ -288,21 +291,16 @@ class App {
     try {
       await connectDatabase();
       
-      // Verification services removed - no longer needed
-      
       this.app.listen(port, () => {
         logger.info(`Server running on http://localhost:${port}`);
         logger.info(`Health check: http://localhost:${port}/api/health`);
         logger.info(`Database health check: http://localhost:${port}/api/health/db`);
-        // Verification API endpoints removed - no longer needed
       });
     } catch (error) {
       logger.error('Failed to start server:', error);
       process.exit(1);
     }
   }
-
-  // Verification services removed - no longer needed
 
   getApp() {
     return this.app;

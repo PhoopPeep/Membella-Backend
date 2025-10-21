@@ -50,6 +50,26 @@ const validateResetToken = [
   validate
 ];
 
+const validateApiKey = {
+  createApiKey: [
+    body('name').trim().isLength({ min: 2, max: 100 }).withMessage('API key name must be between 2 and 100 characters'),
+    body('description').optional().trim().isLength({ max: 500 }).withMessage('Description must be less than 500 characters'),
+    body('permissions').optional().isArray().withMessage('Permissions must be an array'),
+    body('permissions.*').optional().isIn(['features:read', 'features:write', 'features:delete', 'plans:read', 'plans:write', 'members:read']).withMessage('Invalid permission'),
+    body('expiresAt').optional().isISO8601().withMessage('Expiration date must be a valid ISO 8601 date'),
+    validate
+  ],
+  updateApiKey: [
+    body('name').optional().trim().isLength({ min: 2, max: 100 }).withMessage('API key name must be between 2 and 100 characters'),
+    body('description').optional().trim().isLength({ max: 500 }).withMessage('Description must be less than 500 characters'),
+    body('permissions').optional().isArray().withMessage('Permissions must be an array'),
+    body('permissions.*').optional().isIn(['features:read', 'features:write', 'features:delete', 'plans:read', 'plans:write', 'members:read']).withMessage('Invalid permission'),
+    body('is_active').optional().isBoolean().withMessage('is_active must be a boolean'),
+    body('expiresAt').optional().isISO8601().withMessage('Expiration date must be a valid ISO 8601 date'),
+    validate
+  ]
+};
+
 module.exports = {
   validate,
   validateRegistration,
@@ -57,5 +77,6 @@ module.exports = {
   validateFeature,
   validateForgotPassword,
   validateResetPassword,
-  validateResetToken
+  validateResetToken,
+  validateApiKey
 };

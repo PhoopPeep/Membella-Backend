@@ -6,7 +6,6 @@ const { requireMember } = require('../middleware/roleAuth');
 const router = express.Router();
 const memberAuthController = new MemberAuthController();
 
-// Create member-specific validation middleware
 const { body, validationResult } = require('express-validator');
 
 const validate = (req, res, next) => {
@@ -29,7 +28,6 @@ const validate = (req, res, next) => {
   next();
 };
 
-// Member-specific validation (different from owner validation)
 const validateMemberRegistration = [
   body('fullName').trim().isLength({ min: 2, max: 100 }).withMessage('Full name must be between 2 and 100 characters'),
   body('email').isEmail().normalizeEmail().withMessage('Please provide a valid email address'),
@@ -75,7 +73,7 @@ const validateVerifyResetToken = [
   validate
 ];
 
-// Member authentication routes with proper validation
+// Member authentication routes
 router.post('/register', authRateLimiter, validateMemberRegistration, memberAuthController.register);
 router.post('/login', authRateLimiter, validateMemberLogin, memberAuthController.login);
 router.post('/resend-verification', authRateLimiter, validateMemberResendVerification, memberAuthController.resendVerification);

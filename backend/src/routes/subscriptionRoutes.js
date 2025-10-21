@@ -6,7 +6,6 @@ const { apiRateLimiter } = require('../middleware/rateLimiter');
 const router = express.Router();
 const subscriptionController = new SubscriptionController();
 
-// All routes require member authentication
 router.use(requireMember);
 
 router.get('/', apiRateLimiter, subscriptionController.getMemberSubscriptions);
